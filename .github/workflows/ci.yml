@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Unit & ArchUnit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Run Tests
+        run: go test -v -coverprofile=coverage.out ./...
+      - name: Code Coverage Report
+        run: go tool cover -func=coverage.out
+      - name: Verify Domain Coverage
+        run: |
+          DOMAIN_COV=$(go tool cover -func=coverage.out | grep "hue-bridge-emulator/internal/domain" | grep "total:" | awk '{print $3}' | sed 's/%//' | head -n 1)
+          if [ -z "$DOMAIN_COV" ]; then DOMAIN_COV=0; fi
+          echo "Domain Coverage: $DOMAIN_COV%"
+          if [ "$(echo "$DOMAIN_COV < 80" | bc -l)" -eq 1 ]; then
+            echo "Domain coverage is below 80%"
+            exit 1
+          fi
+
+  build:
+    name: Build & Scan
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build Local Image for Scanning
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: hue-bridge-emulator:scan
+          load: true
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'hue-bridge-emulator:scan'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+      - name: Build Multi-arch Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          tags: hue-bridge-emulator:latest

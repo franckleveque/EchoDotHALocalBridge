@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: hue-bridge-emulator
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 80
+    name: http
+  selector:
+    app: hue-bridge-emulator
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hue-bridge-emulator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hue-bridge-emulator
+  template:
+    metadata:
+      labels:
+        app: hue-bridge-emulator
+    spec:
+      hostNetwork: true
+      containers:
+      - name: bridge
+        image: hue-bridge-emulator:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: HASS_URL
+          value: "http://homeassistant.local:8123"
+        - name: HASS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hass-token
+              key: token
+        # LOCAL_IP can be set via downward API if needed, or let the app detect it
+        securityContext:
+          capabilities:
+            add:
+            - NET_BIND_SERVICE
+        resources:
+          limits:
+            memory: "20Mi"
+            cpu: "100m"
+          requests:
+            memory: "10Mi"
+            cpu: "10m"
