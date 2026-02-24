@@ -9,6 +9,7 @@ import (
 	"hue-bridge-emulator/internal/domain/translator"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 type Client struct {
@@ -16,6 +17,7 @@ type Client struct {
 	token      string
 	httpClient *http.Client
 	factory    *translator.Factory
+	mu         sync.RWMutex
 }
 
 type hassState struct {
@@ -24,21 +26,41 @@ type hassState struct {
 	Attributes map[string]interface{} `json:"attributes"`
 }
 
-func NewClient(url, token string) *Client {
+func NewClient() *Client {
 	return &Client{
-		url:        strings.TrimSuffix(url, "/"),
-		token:      token,
 		httpClient: &http.Client{},
 		factory:    translator.NewFactory(),
 	}
 }
 
+func (c *Client) Configure(url, token string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.url = strings.TrimSuffix(url, "/")
+	c.token = token
+}
+
+func (c *Client) IsConfigured() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.url != "" && c.token != ""
+}
+
 func (c *Client) GetDevices(ctx context.Context) ([]*model.Device, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.url+"/api/states", nil)
+	c.mu.RLock()
+	url := c.url
+	token := c.token
+	c.mu.RUnlock()
+
+	if url == "" || token == "" {
+		return nil, fmt.Errorf("Home Assistant not configured")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url+"/api/states", nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
@@ -46,6 +68,10 @@ func (c *Client) GetDevices(ctx context.Context) ([]*model.Device, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HA API error: %d", resp.StatusCode)
+	}
 
 	var states []hassState
 	if err := json.NewDecoder(resp.Body).Decode(&states); err != nil {
@@ -83,34 +109,44 @@ func (c *Client) GetDevices(ctx context.Context) ([]*model.Device, error) {
 }
 
 func (c *Client) SetState(ctx context.Context, device *model.Device, params map[string]interface{}) error {
+	c.mu.RLock()
+	url_base := c.url
+	token := c.token
+	c.mu.RUnlock()
+
+	if url_base == "" || token == "" {
+		return fmt.Errorf("Home Assistant not configured")
+	}
+
 	domain := strings.Split(device.ExternalID, ".")[0]
 	service := "turn_on"
 
 	payload := make(map[string]interface{})
 	for k, v := range params {
+		if k == "on" {
+			if !v.(bool) {
+				service = "turn_off"
+			}
+			continue
+		}
 		payload[k] = v
 	}
 	payload["entity_id"] = device.ExternalID
 
-	// Handle specific services
 	if device.Type == model.DeviceTypeCover {
 		service = "set_cover_position"
 	} else if device.Type == model.DeviceTypeClimate {
 		service = "set_temperature"
-	} else if device.Type == model.DeviceTypeLight {
-		if on, ok := params["on"].(bool); ok && !on {
-			service = "turn_off"
-		}
 	}
 
-	url := fmt.Sprintf("%s/api/services/%s/%s", c.url, domain, service)
+	url := fmt.Sprintf("%s/api/services/%s/%s", url_base, domain, service)
 	body, _ := json.Marshal(payload)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)

@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"hue-bridge-emulator/internal/adapters/input/http"
 	"hue-bridge-emulator/internal/adapters/input/ssdp"
 	"hue-bridge-emulator/internal/adapters/output/homeassistant"
+	"hue-bridge-emulator/internal/adapters/output/persistence"
 	"hue-bridge-emulator/internal/domain/service"
 	"log"
 	"net"
@@ -12,12 +14,6 @@ import (
 )
 
 func main() {
-	hassURL := os.Getenv("HASS_URL")
-	hassToken := os.Getenv("HASS_TOKEN")
-	if hassURL == "" || hassToken == "" {
-		log.Fatal("HASS_URL and HASS_TOKEN must be set")
-	}
-
 	ip := os.Getenv("LOCAL_IP")
 	if ip == "" {
 		ip = getLocalIP()
@@ -28,8 +24,32 @@ func main() {
 
 	fmt.Printf("Starting Hue Bridge Emulator on %s\n", ip)
 
-	haClient := homeassistant.NewClient(hassURL, hassToken)
-	bridgeService := service.NewBridgeService(haClient)
+	// Persistance
+	configRepo := persistence.NewJSONConfigRepository("/app/config.json")
+	if os.Getenv("CONFIG_PATH") != "" {
+		configRepo = persistence.NewJSONConfigRepository(os.Getenv("CONFIG_PATH"))
+	}
+
+	// HA Client
+	haClient := homeassistant.NewClient()
+
+	// Load initial config if exists
+	cfg, err := configRepo.Get(context.Background())
+	if err == nil && cfg.HassURL != "" && cfg.HassToken != "" {
+		haClient.Configure(cfg.HassURL, cfg.HassToken)
+	} else {
+		// Try env vars for initial config
+		hassURL := os.Getenv("HASS_URL")
+		hassToken := os.Getenv("HASS_TOKEN")
+		if hassURL != "" && hassToken != "" {
+			haClient.Configure(hassURL, hassToken)
+			cfg.HassURL = hassURL
+			cfg.HassToken = hassToken
+			configRepo.Save(context.Background(), cfg)
+		}
+	}
+
+	bridgeService := service.NewBridgeService(haClient, configRepo)
 
 	// Start SSDP Server
 	ssdpServer := ssdp.NewServer(ip)

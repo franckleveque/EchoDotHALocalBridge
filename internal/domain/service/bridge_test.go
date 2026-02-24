@@ -24,13 +24,39 @@ func (m *MockHAPort) SetState(ctx context.Context, device *model.Device, params 
 	return args.Error(0)
 }
 
+func (m *MockHAPort) Configure(url, token string) {
+	m.Called(url, token)
+}
+
+func (m *MockHAPort) IsConfigured() bool {
+	args := m.Called()
+	return args.Bool(0)
+}
+
+type MockConfigRepo struct {
+	mock.Mock
+}
+
+func (m *MockConfigRepo) Get(ctx context.Context) (*model.Config, error) {
+	args := m.Called(ctx)
+	return args.Get(0).(*model.Config), args.Error(1)
+}
+
+func (m *MockConfigRepo) Save(ctx context.Context, config *model.Config) error {
+	args := m.Called(ctx, config)
+	return args.Error(0)
+}
+
 func TestBridgeService_GetDevices(t *testing.T) {
 	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+
+	mockHA.On("IsConfigured").Return(true)
 	mockHA.On("GetDevices", mock.Anything).Return([]*model.Device{
 		{ID: "1", Name: "Test Light", Type: model.DeviceTypeLight, State: &huego.State{On: true}},
 	}, nil)
 
-	s := NewBridgeService(mockHA)
+	s := NewBridgeService(mockHA, mockRepo)
 	devices, err := s.GetDevices(context.Background())
 
 	assert.NoError(t, err)
@@ -40,32 +66,35 @@ func TestBridgeService_GetDevices(t *testing.T) {
 
 func TestBridgeService_UpdateDeviceState(t *testing.T) {
 	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
 	dev := &model.Device{ID: "1", Name: "Test Light", Type: model.DeviceTypeLight, State: &huego.State{On: false}}
 
+	mockHA.On("IsConfigured").Return(true)
 	mockHA.On("GetDevices", mock.Anything).Return([]*model.Device{dev}, nil)
 	mockHA.On("SetState", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
-	s := NewBridgeService(mockHA)
+	s := NewBridgeService(mockHA, mockRepo)
 	_, _ = s.GetDevices(context.Background()) // Load devices
 
 	err := s.UpdateDeviceState(context.Background(), "1", map[string]interface{}{"on": true, "bri": float64(254)})
 	assert.NoError(t, err)
 
-	// Optimistic update
 	assert.True(t, dev.State.On)
 	assert.Equal(t, uint8(254), dev.State.Bri)
 
-	// Wait a bit for async call
 	time.Sleep(100 * time.Millisecond)
 	mockHA.AssertExpectations(t)
 }
 
 func TestBridgeService_GetDevice(t *testing.T) {
 	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
 	dev := &model.Device{ID: "1", Name: "Test Light", Type: model.DeviceTypeLight, State: &huego.State{On: true}}
+
+	mockHA.On("IsConfigured").Return(true)
 	mockHA.On("GetDevices", mock.Anything).Return([]*model.Device{dev}, nil)
 
-	s := NewBridgeService(mockHA)
+	s := NewBridgeService(mockHA, mockRepo)
 	_, _ = s.GetDevices(context.Background())
 
 	d, err := s.GetDevice(context.Background(), "1")

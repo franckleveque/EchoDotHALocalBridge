@@ -12,27 +12,31 @@ import (
 
 type BridgeService struct {
 	haPort            ports.HomeAssistantPort
+	configRepo        ports.ConfigRepository
 	translatorFactory *translator.Factory
 	devices           map[string]*model.Device
 	mu                sync.RWMutex
 }
 
-func NewBridgeService(haPort ports.HomeAssistantPort) *BridgeService {
+func NewBridgeService(haPort ports.HomeAssistantPort, configRepo ports.ConfigRepository) *BridgeService {
 	return &BridgeService{
 		haPort:            haPort,
+		configRepo:        configRepo,
 		translatorFactory: translator.NewFactory(),
 		devices:           make(map[string]*model.Device),
 	}
 }
 
 func (s *BridgeService) RefreshDevices(ctx context.Context) error {
+	if !s.haPort.IsConfigured() {
+		return fmt.Errorf("Home Assistant is not configured")
+	}
 	devices, err := s.haPort.GetDevices(ctx)
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Keep existing devices but update states
 	newDevices := make(map[string]*model.Device)
 	for _, d := range devices {
 		newDevices[d.ID] = d
@@ -42,6 +46,9 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 }
 
 func (s *BridgeService) GetDevices(ctx context.Context) ([]*model.Device, error) {
+	if !s.haPort.IsConfigured() {
+		return []*model.Device{}, nil
+	}
 	s.mu.RLock()
 	if len(s.devices) == 0 {
 		s.mu.RUnlock()
@@ -79,9 +86,6 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 
 	t := s.translatorFactory.GetTranslator(device.Type)
 
-	// Convert hueStateUpdate (from API) to a huego.State for the translator
-	// This is a bit tricky because huego.State has many fields.
-	// For simplicity, we create a temporary state.
 	tmpState := &huego.State{}
 	if on, ok := hueStateUpdate["on"].(bool); ok {
 		tmpState.On = on
@@ -92,7 +96,6 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 
 	params := t.ToHA(tmpState)
 
-	// Asynchronous call to HA as requested
 	go func() {
 		err := s.haPort.SetState(context.Background(), device, params)
 		if err != nil {
@@ -100,7 +103,6 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 		}
 	}()
 
-	// Optimistic update
 	if on, ok := hueStateUpdate["on"].(bool); ok {
 		device.State.On = on
 	}
@@ -109,4 +111,17 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 	}
 
 	return nil
+}
+
+func (s *BridgeService) GetConfig(ctx context.Context) (*model.Config, error) {
+	return s.configRepo.Get(ctx)
+}
+
+func (s *BridgeService) UpdateConfig(ctx context.Context, cfg *model.Config) error {
+	err := s.configRepo.Save(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	s.haPort.Configure(cfg.HassURL, cfg.HassToken)
+	return s.RefreshDevices(ctx)
 }
