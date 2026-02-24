@@ -29,9 +29,14 @@ func (r *JSONConfigRepository) Get(ctx context.Context) (*model.Config, error) {
 		return nil, err
 	}
 
-	var cfg model.Config
+	cfg := model.Config{
+		EntityMappings: make(map[string]*model.EntityMapping),
+	}
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
+	}
+	if cfg.EntityMappings == nil {
+		cfg.EntityMappings = make(map[string]*model.EntityMapping)
 	}
 	return &cfg, nil
 }

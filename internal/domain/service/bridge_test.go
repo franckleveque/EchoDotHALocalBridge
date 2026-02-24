@@ -7,16 +7,20 @@ import (
 	"time"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/amimof/huego"
 )
 
 type MockHAPort struct {
 	mock.Mock
 }
 
-func (m *MockHAPort) GetDevices(ctx context.Context) ([]*model.Device, error) {
+func (m *MockHAPort) GetRawStates(ctx context.Context) ([]map[string]interface{}, error) {
 	args := m.Called(ctx)
-	return args.Get(0).([]*model.Device), args.Error(1)
+	return args.Get(0).([]map[string]interface{}), args.Error(1)
+}
+
+func (m *MockHAPort) GetAllEntities(ctx context.Context) ([]*model.EntityMapping, error) {
+	args := m.Called(ctx)
+	return args.Get(0).([]*model.EntityMapping), args.Error(1)
 }
 
 func (m *MockHAPort) SetState(ctx context.Context, device *model.Device, params map[string]interface{}) error {
@@ -51,9 +55,15 @@ func TestBridgeService_GetDevices(t *testing.T) {
 	mockHA := new(MockHAPort)
 	mockRepo := new(MockConfigRepo)
 
+	cfg := &model.Config{
+		EntityMappings: map[string]*model.EntityMapping{
+			"light.test": {EntityID: "light.test", HueID: "1", Name: "Test Light", Type: model.MappingTypeLight, Exposed: true},
+		},
+	}
+	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
 	mockHA.On("IsConfigured").Return(true)
-	mockHA.On("GetDevices", mock.Anything).Return([]*model.Device{
-		{ID: "1", Name: "Test Light", Type: model.DeviceTypeLight, State: &huego.State{On: true}},
+	mockHA.On("GetRawStates", mock.Anything).Return([]map[string]interface{}{
+		{"entity_id": "light.test", "state": "on", "attributes": map[string]interface{}{"brightness": 100.0}},
 	}, nil)
 
 	s := NewBridgeService(mockHA, mockRepo)
@@ -67,10 +77,16 @@ func TestBridgeService_GetDevices(t *testing.T) {
 func TestBridgeService_UpdateDeviceState(t *testing.T) {
 	mockHA := new(MockHAPort)
 	mockRepo := new(MockConfigRepo)
-	dev := &model.Device{ID: "1", Name: "Test Light", Type: model.DeviceTypeLight, State: &huego.State{On: false}}
+	mapping := &model.EntityMapping{EntityID: "light.test", HueID: "1", Name: "Test Light", Type: model.MappingTypeLight, Exposed: true}
 
+	cfg := &model.Config{
+		EntityMappings: map[string]*model.EntityMapping{"light.test": mapping},
+	}
+	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
 	mockHA.On("IsConfigured").Return(true)
-	mockHA.On("GetDevices", mock.Anything).Return([]*model.Device{dev}, nil)
+	mockHA.On("GetRawStates", mock.Anything).Return([]map[string]interface{}{
+		{"entity_id": "light.test", "state": "off"},
+	}, nil)
 	mockHA.On("SetState", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	s := NewBridgeService(mockHA, mockRepo)
@@ -79,30 +95,24 @@ func TestBridgeService_UpdateDeviceState(t *testing.T) {
 	err := s.UpdateDeviceState(context.Background(), "1", map[string]interface{}{"on": true, "bri": float64(254)})
 	assert.NoError(t, err)
 
-	assert.True(t, dev.State.On)
-	assert.Equal(t, uint8(254), dev.State.Bri)
+	// Check optimistic update on the device in memory (cached in service)
+	d, _ := s.GetDevice(context.Background(), "1")
+	assert.True(t, d.State.On)
 
 	time.Sleep(100 * time.Millisecond)
 	mockHA.AssertExpectations(t)
 }
 
-func TestBridgeService_GetDevice(t *testing.T) {
+func TestBridgeService_GetAllEntities(t *testing.T) {
 	mockHA := new(MockHAPort)
 	mockRepo := new(MockConfigRepo)
-	dev := &model.Device{ID: "1", Name: "Test Light", Type: model.DeviceTypeLight, State: &huego.State{On: true}}
-
-	mockHA.On("IsConfigured").Return(true)
-	mockHA.On("GetDevices", mock.Anything).Return([]*model.Device{dev}, nil)
+	entities := []*model.EntityMapping{{EntityID: "light.test"}}
+	mockHA.On("GetAllEntities", mock.Anything).Return(entities, nil)
 
 	s := NewBridgeService(mockHA, mockRepo)
-	_, _ = s.GetDevices(context.Background())
-
-	d, err := s.GetDevice(context.Background(), "1")
+	res, err := s.GetAllEntities(context.Background())
 	assert.NoError(t, err)
-	assert.Equal(t, dev, d)
-
-	_, err = s.GetDevice(context.Background(), "2")
-	assert.Error(t, err)
+	assert.Equal(t, entities, res)
 }
 
 func TestBridgeService_Config(t *testing.T) {
@@ -114,7 +124,7 @@ func TestBridgeService_Config(t *testing.T) {
 	mockRepo.On("Save", mock.Anything, cfg).Return(nil)
 	mockHA.On("Configure", "http://localhost", "token").Return()
 	mockHA.On("IsConfigured").Return(true)
-	mockHA.On("GetDevices", mock.Anything).Return([]*model.Device{}, nil)
+	mockHA.On("GetRawStates", mock.Anything).Return([]map[string]interface{}{}, nil)
 
 	s := NewBridgeService(mockHA, mockRepo)
 

@@ -2,11 +2,12 @@ package translator
 
 import (
 	"github.com/amimof/huego"
+	"hue-bridge-emulator/internal/domain/model"
 )
 
 type LightStrategy struct{}
 
-func (s *LightStrategy) ToHue(haState map[string]interface{}) *huego.State {
+func (s *LightStrategy) ToHue(haState map[string]interface{}, mapping *model.EntityMapping) *huego.State {
 	state := &huego.State{}
 	if val, ok := haState["state"].(string); ok {
 		state.On = (val == "on")
@@ -20,7 +21,7 @@ func (s *LightStrategy) ToHue(haState map[string]interface{}) *huego.State {
 	return state
 }
 
-func (s *LightStrategy) ToHA(hueState *huego.State) map[string]interface{} {
+func (s *LightStrategy) ToHA(hueState *huego.State, mapping *model.EntityMapping) map[string]interface{} {
 	params := make(map[string]interface{})
 	params["on"] = hueState.On
 	if hueState.Bri > 0 {

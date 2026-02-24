@@ -1,18 +1,23 @@
-# Agent Instructions
+# Agent Instructions - SOLID & Hexagonal Guidelines
 
-## Coding Standards
+## Mandatory Architecture
 
-- **Hexagonal Architecture**: Do not allow infrastructure imports in the domain layer. Use `internal/architecture_test.go` to verify.
-- **Library Choice**: Always use `github.com/amimof/huego` for Hue models.
-- **Asynchrony**: All calls to Home Assistant must be asynchronous to ensure low latency for the Hue API.
-- **Performance**: Keep the binary size and memory usage minimal. Use `scratch` as the base image.
+1.  **Hexagonal Isolation**: Never import `internal/adapters/...` from `internal/domain/...`.
+2.  **SOLID Principles**:
+    *   **SRP**: Each file should have one clear purpose. Handlers handle HTTP, Clients handle API calls, Strategies handle translation.
+    *   **OCP**: Use the Factory pattern for adding new device types.
+    *   **DIP**: Always inject dependencies via Port interfaces.
+3.  **Huego library**: Use `github.com/amimof/huego` for Hue-related models.
+4.  **Asynchrony**: HA service calls MUST be asynchronous to keep the Hue API responsive for Alexa.
 
-## Testing
+## Domain Logic
 
-- Maintain > 80% coverage in the `internal/domain` package.
-- Use mocks for `HomeAssistantPort` when testing domain services.
+*   The translation formulas are linear.
+*   The `CustomStrategy` evaluates formulas where `x` is the input value.
+*   The `BridgeService` handles the optimistic state update.
 
-## Deployment
+## Compliance
 
-- Ensure the Kubernetes manifests include `securityContext` with `NET_BIND_SERVICE` capability.
-- Use `hostNetwork: true` for SSDP functionality.
+*   Run `make test` before every commit.
+*   ArchUnit tests MUST pass.
+*   Maintain > 80% coverage in `internal/domain/service` and `internal/domain/translator`.

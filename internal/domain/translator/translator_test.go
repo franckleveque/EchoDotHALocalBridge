@@ -3,10 +3,12 @@ package translator
 import (
 	"testing"
 	"github.com/stretchr/testify/assert"
+	"hue-bridge-emulator/internal/domain/model"
 )
 
 func TestLightStrategy(t *testing.T) {
 	s := &LightStrategy{}
+	mapping := &model.EntityMapping{Type: model.MappingTypeLight}
 
 	// HA to Hue
 	haState := map[string]interface{}{
@@ -15,57 +17,81 @@ func TestLightStrategy(t *testing.T) {
 			"brightness": 127.0,
 		},
 	}
-	hueState := s.ToHue(haState)
+	hueState := s.ToHue(haState, mapping)
 	assert.True(t, hueState.On)
 	assert.Equal(t, uint8(127), hueState.Bri)
 
 	// Hue to HA
 	hueState.Bri = 200
-	haParams := s.ToHA(hueState)
+	haParams := s.ToHA(hueState, mapping)
 	assert.Equal(t, uint8(200), haParams["brightness"])
 }
 
 func TestCoverStrategy(t *testing.T) {
 	s := &CoverStrategy{}
-
-	// HA to Hue
+	mapping := &model.EntityMapping{Type: model.MappingTypeCover}
 	haState := map[string]interface{}{
 		"state": "open",
-		"attributes": map[string]interface{}{
-			"current_position": 50.0,
-		},
+		"attributes": map[string]interface{}{"current_position": 50.0},
 	}
-	hueState := s.ToHue(haState)
-	assert.True(t, hueState.On)
-	assert.Equal(t, uint8(127), hueState.Bri) // 50 * 2.54
+	hueState := s.ToHue(haState, mapping)
+	assert.Equal(t, uint8(127), hueState.Bri)
 
-	// Hue to HA
 	hueState.Bri = 254
-	haParams := s.ToHA(hueState)
+	haParams := s.ToHA(hueState, mapping)
 	assert.Equal(t, 100, haParams["position"])
 }
 
 func TestClimateStrategy(t *testing.T) {
 	s := &ClimateStrategy{}
-
-	// HA to Hue
+	mapping := &model.EntityMapping{Type: model.MappingTypeClimate}
 	haState := map[string]interface{}{
-		"attributes": map[string]interface{}{
-			"temperature": 21.0,
+		"attributes": map[string]interface{}{"temperature": 21.0},
+	}
+	hueState := s.ToHue(haState, mapping)
+	assert.Equal(t, uint8(169), hueState.Bri)
+
+	hueState.Bri = 254
+	haParams := s.ToHA(hueState, mapping)
+	assert.Equal(t, 28.0, haParams["temperature"])
+}
+
+func TestCustomStrategy(t *testing.T) {
+	s := &CustomStrategy{}
+	mapping := &model.EntityMapping{
+		EntityID: "input_number.test",
+		Type: model.MappingTypeCustom,
+		CustomFormula: &model.CustomFormula{
+			ToHueFormula: "x * 2.54",
+			ToHAFormula: "x / 2.54",
 		},
 	}
-	hueState := s.ToHue(haState)
-	assert.Equal(t, uint8(169), hueState.Bri) // (21-7)*254/21 = 14*254/21 = 2/3 * 254 = 169.33
 
-	// Hue to HA
+	haState := map[string]interface{}{
+		"state": "50",
+		"attributes": map[string]interface{}{"brightness": 50.0},
+	}
+	hueState := s.ToHue(haState, mapping)
+	assert.Equal(t, uint8(127), hueState.Bri)
+
 	hueState.Bri = 254
-	haParams := s.ToHA(hueState)
-	assert.Equal(t, 28.0, haParams["temperature"])
+	haParams := s.ToHA(hueState, mapping)
+	assert.InDelta(t, 100.0, haParams["value"].(float64), 0.1)
+}
+
+func TestCustomStrategy_Evaluate(t *testing.T) {
+	s := &CustomStrategy{}
+	assert.Equal(t, 10.0, s.evaluate("x * 2", 5))
+	assert.Equal(t, 5.0, s.evaluate("x / 2", 10))
+	assert.Equal(t, 15.0, s.evaluate("x + 5", 10))
+	assert.Equal(t, 5.0, s.evaluate("x - 5", 10))
+	assert.Equal(t, 20.0, s.evaluate("x * 2 + 10", 5))
 }
 
 func TestFactory(t *testing.T) {
 	f := NewFactory()
-	assert.IsType(t, &LightStrategy{}, f.GetTranslator("light"))
-	assert.IsType(t, &CoverStrategy{}, f.GetTranslator("cover"))
-	assert.IsType(t, &ClimateStrategy{}, f.GetTranslator("climate"))
+	assert.IsType(t, &LightStrategy{}, f.GetTranslator(model.MappingTypeLight))
+	assert.IsType(t, &CoverStrategy{}, f.GetTranslator(model.MappingTypeCover))
+	assert.IsType(t, &ClimateStrategy{}, f.GetTranslator(model.MappingTypeClimate))
+	assert.IsType(t, &CustomStrategy{}, f.GetTranslator(model.MappingTypeCustom))
 }

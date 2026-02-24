@@ -1,57 +1,45 @@
-# Hue Bridge Emulator for Home Assistant
+# Hue Bridge Emulator for Home Assistant (SOLID Edition)
 
-This project is a high-performance, lightweight Hue V1 bridge emulator designed to interface an Echo Dot 3 (or other Alexa devices) with Home Assistant.
+This bridge allows emulating a Philips Hue V1 Bridge to expose Home Assistant entities to Alexa (Echo Dot 3).
 
-## Features
+## 🚀 Key Features
 
-- **Hexagonal Architecture**: Strict isolation between domain logic, ports, and adapters.
-- **Translation Engine**: Factory + Strategy pattern for Light, Cover, and Climate (7-28°C range).
-- **SSDP Discovery**: Automatic discovery by Alexa devices.
-- **Lightweight**: Multi-arch Docker `scratch` image with < 20MB RAM usage.
-- **Async HA Calls**: Non-blocking calls to Home Assistant REST API.
-- **High Coverage**: > 90% domain logic coverage.
-- **Security**: Runs as non-root with minimal capabilities (`CAP_NET_BIND_SERVICE`).
+- **Hexagonal Architecture**: Strict isolation between business logic and infrastructure.
+- **SOLID Compliance**: High modularity, dependency inversion, and single responsibility.
+- **Dynamic Entity Discovery**: Fetch all HA entities (lights, covers, climate, switches, input_numbers, groups).
+- **Flexible Mapping**: Choose which entities to expose and how.
+- **Custom Translation Engine**: Define your own conversion formulas (linear mapping) for non-standard devices.
+- **Multi-arch Support**: Docker images for amd64 and arm64.
+- **High Performance**: Asynchronous calls to Home Assistant, minimal footprint (< 20MB RAM).
 
-## Architecture
+## 🛠 Admin Interface
 
-The project follows the Hexagonal Architecture pattern:
-- `internal/domain`: Core business logic and entities.
-- `internal/ports`: Interface definitions for input and output.
-- `internal/adapters`: Implementations of Hue API, SSDP, and Home Assistant client.
+Access the admin UI at `http://<IP>/admin`.
+- **General Config**: Set Home Assistant URL and Token.
+- **Home Assistant Devices**:
+  - List all discoverable entities.
+  - Check "Expose" to make an entity visible to Alexa.
+  - Select "Type" (Light, Cover, Climate, Custom).
+  - For "Custom", define "To Hue" and "To HA" formulas using `x` as variable.
 
-## Deployment on Talos / Kubernetes
+## 📐 Architecture & SOLID
 
-The emulator requires `hostNetwork: true` for SSDP multicast discovery to work correctly.
+- **Single Responsibility**: Each strategy handles one type of conversion. The bridge service only coordinates.
+- **Open/Closed**: New device types can be added by implementing the `Translator` interface and registering them in the `Factory` without modifying existing logic.
+- **Liskov Substitution**: All strategies are interchangeable via the `Translator` interface.
+- **Interface Segregation**: Ports define minimal required interfaces for the domain.
+- **Dependency Inversion**: Domain services depend on interfaces (ports), not concrete adapter implementations.
 
-### Prerequisites
-
-- A Home Assistant instance with a Long-Lived Access Token.
-- A Kubernetes cluster (optimized for Talos).
-
-### Configuration
-
-Set the following environment variables:
-- `HASS_URL`: Your Home Assistant URL (e.g., `http://192.168.1.10:8123`).
-- `HASS_TOKEN`: Your Home Assistant Long-Lived Access Token.
-- `LOCAL_IP`: (Optional) The IP address of the node. If not set, it will be automatically detected.
-
-## CI/CD
-
-The project includes a GitHub Actions pipeline that:
-- Runs Unit and ArchUnit tests.
-- Enforces > 80% domain code coverage.
-- Builds a multi-arch static binary and Docker image.
-- Performs Trivy vulnerability scanning.
-
-## Development
+## 🧪 Testing
 
 ```bash
-# Run tests
 make test
-
-# Build binary
-make build
-
-# Check coverage
-make coverage
 ```
+ArchUnit is used to enforce architectural boundaries. Domain coverage is strictly monitored (> 80%).
+
+## 📦 Deployment
+
+Optimized for **Talos Cluster**:
+- `hostNetwork: true` for SSDP.
+- `CAP_NET_BIND_SERVICE` for port 80.
+- `scratch` base image for security.

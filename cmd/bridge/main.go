@@ -60,9 +60,13 @@ func main() {
 	}()
 
 	// Start HTTP Server
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "80"
+	}
 	httpServer := http.NewServer(bridgeService, ip)
-	log.Printf("HTTP Server listening on :80")
-	if err := httpServer.ListenAndServe(":80"); err != nil {
+	log.Printf("HTTP Server listening on :%s", port)
+	if err := httpServer.ListenAndServe(":"+port); err != nil {
 		log.Fatal(err)
 	}
 }

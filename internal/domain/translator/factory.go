@@ -5,22 +5,23 @@ import (
 )
 
 type Factory struct {
-	strategies map[model.DeviceType]Translator
+	strategies map[model.MappingType]Translator
 }
 
 func NewFactory() *Factory {
 	return &Factory{
-		strategies: map[model.DeviceType]Translator{
-			model.DeviceTypeLight:   &LightStrategy{},
-			model.DeviceTypeCover:   &CoverStrategy{},
-			model.DeviceTypeClimate: &ClimateStrategy{},
+		strategies: map[model.MappingType]Translator{
+			model.MappingTypeLight:   &LightStrategy{},
+			model.MappingTypeCover:   &CoverStrategy{},
+			model.MappingTypeClimate: &ClimateStrategy{},
+			model.MappingTypeCustom:  &CustomStrategy{},
 		},
 	}
 }
 
-func (f *Factory) GetTranslator(deviceType model.DeviceType) Translator {
-	if t, ok := f.strategies[deviceType]; ok {
+func (f *Factory) GetTranslator(mappingType model.MappingType) Translator {
+	if t, ok := f.strategies[mappingType]; ok {
 		return t
 	}
-	return f.strategies[model.DeviceTypeLight]
+	return f.strategies[model.MappingTypeLight]
 }

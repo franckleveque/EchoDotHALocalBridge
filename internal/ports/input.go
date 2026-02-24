@@ -13,4 +13,5 @@ type BridgePort interface {
 	// Config management
 	GetConfig(ctx context.Context) (*model.Config, error)
 	UpdateConfig(ctx context.Context, cfg *model.Config) error
+	GetAllEntities(ctx context.Context) ([]*model.EntityMapping, error)
 }

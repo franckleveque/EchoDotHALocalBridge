@@ -29,26 +29,47 @@ func NewBridgeService(haPort ports.HomeAssistantPort, configRepo ports.ConfigRep
 
 func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 	if !s.haPort.IsConfigured() {
-		return fmt.Errorf("Home Assistant is not configured")
+		return nil
 	}
-	devices, err := s.haPort.GetDevices(ctx)
+
+	cfg, err := s.configRepo.Get(ctx)
 	if err != nil {
 		return err
 	}
+
+	states, err := s.haPort.GetRawStates(ctx)
+	if err != nil {
+		return err
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	newDevices := make(map[string]*model.Device)
-	for _, d := range devices {
-		newDevices[d.ID] = d
+
+	for _, state := range states {
+		entityID, _ := state["entity_id"].(string)
+		mapping, ok := cfg.EntityMappings[entityID]
+		if !ok || !mapping.Exposed {
+			continue
+		}
+
+		t := s.translatorFactory.GetTranslator(mapping.Type)
+		hueState := t.ToHue(state, mapping)
+
+		newDevices[mapping.HueID] = &model.Device{
+			ID:         mapping.HueID,
+			Name:       mapping.Name,
+			Type:       mapping.Type,
+			ExternalID: entityID,
+			State:      hueState,
+			Mapping:    mapping,
+		}
 	}
 	s.devices = newDevices
 	return nil
 }
 
 func (s *BridgeService) GetDevices(ctx context.Context) ([]*model.Device, error) {
-	if !s.haPort.IsConfigured() {
-		return []*model.Device{}, nil
-	}
 	s.mu.RLock()
 	if len(s.devices) == 0 {
 		s.mu.RUnlock()
@@ -94,7 +115,7 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 		tmpState.Bri = uint8(bri)
 	}
 
-	params := t.ToHA(tmpState)
+	params := t.ToHA(tmpState, device.Mapping)
 
 	// Optimistic update under lock
 	if on, ok := hueStateUpdate["on"].(bool); ok {
@@ -141,4 +162,8 @@ func (s *BridgeService) UpdateConfig(ctx context.Context, cfg *model.Config) err
 	}
 	s.haPort.Configure(cfg.HassURL, cfg.HassToken)
 	return s.RefreshDevices(ctx)
+}
+
+func (s *BridgeService) GetAllEntities(ctx context.Context) ([]*model.EntityMapping, error) {
+	return s.haPort.GetAllEntities(ctx)
 }
