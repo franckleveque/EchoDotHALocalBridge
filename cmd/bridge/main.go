@@ -25,7 +25,7 @@ func main() {
 	fmt.Printf("Starting Hue Bridge Emulator on %s\n", ip)
 
 	// Persistance
-	configRepo := persistence.NewJSONConfigRepository("/app/config.json")
+	configRepo := persistence.NewJSONConfigRepository("/data/config.json")
 	if os.Getenv("CONFIG_PATH") != "" {
 		configRepo = persistence.NewJSONConfigRepository(os.Getenv("CONFIG_PATH"))
 	}

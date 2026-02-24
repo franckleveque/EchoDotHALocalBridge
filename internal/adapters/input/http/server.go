@@ -73,6 +73,7 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 
 	subPath := parts[1:]
 	if len(subPath) == 0 {
+		s.handleFullState(w, r)
 		return
 	}
 
@@ -91,6 +92,47 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprint(w, `[{"success":{"username": "admin"}}]`)
+}
+
+func (s *Server) handleFullState(w http.ResponseWriter, r *http.Request) {
+	devices, err := s.bridge.GetDevices(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	lights := make(map[string]*huego.Light)
+	for _, d := range devices {
+		lights[d.ID] = &huego.Light{
+			Name:             d.Name,
+			Type:             "Extended color light",
+			State:            d.State,
+			ModelID:          "LCT001",
+			UniqueID:         d.ID,
+			ManufacturerName: "Philips",
+		}
+	}
+
+	fullState := map[string]interface{}{
+		"lights": lights,
+		"groups": make(map[string]interface{}),
+		"config": map[string]interface{}{
+			"name":       "Philips hue",
+			"swversion":  "01003542",
+			"apiversion": "1.11.0",
+			"mac":        "00:17:88:10:22:01",
+			"bridgeid":   "001788FFFE102201",
+			"modelid":    "BSB001",
+		},
+		"schedules":     make(map[string]interface{}),
+		"scenes":        make(map[string]interface{}),
+		"rules":         make(map[string]interface{}),
+		"sensors":       make(map[string]interface{}),
+		"resourcelinks": make(map[string]interface{}),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(fullState)
 }
 
 func (s *Server) handleGetLights(w http.ResponseWriter, r *http.Request) {

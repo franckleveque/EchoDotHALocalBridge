@@ -11,6 +11,17 @@ spec:
   selector:
     app: hue-bridge-emulator
 ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hue-bridge-config-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -38,7 +49,6 @@ spec:
             secretKeyRef:
               name: hass-token
               key: token
-        # LOCAL_IP can be set via downward API if needed, or let the app detect it
         securityContext:
           capabilities:
             add:
@@ -50,3 +60,10 @@ spec:
           requests:
             memory: "10Mi"
             cpu: "10m"
+        volumeMounts:
+        - name: config-storage
+          mountPath: /data
+      volumes:
+      - name: config-storage
+        persistentVolumeClaim:
+          claimName: hue-bridge-config-pvc

@@ -104,3 +104,29 @@ func TestBridgeService_GetDevice(t *testing.T) {
 	_, err = s.GetDevice(context.Background(), "2")
 	assert.Error(t, err)
 }
+
+func TestBridgeService_Config(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+	cfg := &model.Config{HassURL: "http://localhost", HassToken: "token"}
+
+	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
+	mockRepo.On("Save", mock.Anything, cfg).Return(nil)
+	mockHA.On("Configure", "http://localhost", "token").Return()
+	mockHA.On("IsConfigured").Return(true)
+	mockHA.On("GetDevices", mock.Anything).Return([]*model.Device{}, nil)
+
+	s := NewBridgeService(mockHA, mockRepo)
+
+	// Test GetConfig
+	res, err := s.GetConfig(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, cfg, res)
+
+	// Test UpdateConfig
+	err = s.UpdateConfig(context.Background(), cfg)
+	assert.NoError(t, err)
+
+	mockRepo.AssertExpectations(t)
+	mockHA.AssertExpectations(t)
+}

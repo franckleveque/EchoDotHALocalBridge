@@ -61,26 +61,26 @@ func (s *BridgeService) GetDevices(ctx context.Context) ([]*model.Device, error)
 	defer s.mu.RUnlock()
 	devices := make([]*model.Device, 0, len(s.devices))
 	for _, d := range s.devices {
-		devices = append(devices, d)
+		devices = append(devices, s.copyDevice(d))
 	}
 	return devices, nil
 }
 
 func (s *BridgeService) GetDevice(ctx context.Context, id string) (*model.Device, error) {
 	s.mu.RLock()
+	defer s.mu.RUnlock()
 	d, ok := s.devices[id]
-	s.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("device %s not found", id)
 	}
-	return d, nil
+	return s.copyDevice(d), nil
 }
 
 func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueStateUpdate map[string]interface{}) error {
-	s.mu.RLock()
+	s.mu.Lock()
 	device, ok := s.devices[id]
-	s.mu.RUnlock()
 	if !ok {
+		s.mu.Unlock()
 		return fmt.Errorf("device %s not found", id)
 	}
 
@@ -96,13 +96,7 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 
 	params := t.ToHA(tmpState)
 
-	go func() {
-		err := s.haPort.SetState(context.Background(), device, params)
-		if err != nil {
-			fmt.Printf("Error setting HA state: %v\n", err)
-		}
-	}()
-
+	// Optimistic update under lock
 	if on, ok := hueStateUpdate["on"].(bool); ok {
 		device.State.On = on
 	}
@@ -110,7 +104,30 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 		device.State.Bri = uint8(bri)
 	}
 
+	deviceCopy := s.copyDevice(device)
+	s.mu.Unlock()
+
+	go func() {
+		err := s.haPort.SetState(context.Background(), deviceCopy, params)
+		if err != nil {
+			fmt.Printf("Error setting HA state: %v\n", err)
+		}
+	}()
+
 	return nil
+}
+
+func (s *BridgeService) copyDevice(d *model.Device) *model.Device {
+	dCopy := *d
+	if d.State != nil {
+		stateCopy := *d.State
+		if d.State.Xy != nil {
+			stateCopy.Xy = make([]float32, len(d.State.Xy))
+			copy(stateCopy.Xy, d.State.Xy)
+		}
+		dCopy.State = &stateCopy
+	}
+	return &dCopy
 }
 
 func (s *BridgeService) GetConfig(ctx context.Context) (*model.Config, error) {
