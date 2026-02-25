@@ -65,10 +65,20 @@ func (s *CustomStrategy) ToHA(hueState *huego.State, mapping *model.EntityMappin
 	}
 
 	if mapping.CustomFormula != nil {
-		if hueState.On && mapping.CustomFormula.OnEffect != "" {
-			params["effect"] = mapping.CustomFormula.OnEffect
-		} else if !hueState.On && mapping.CustomFormula.OffEffect != "" {
-			params["effect"] = mapping.CustomFormula.OffEffect
+		if hueState.On {
+			if mapping.CustomFormula.OnService != "" {
+				params["service"] = mapping.CustomFormula.OnService
+			}
+			if mapping.CustomFormula.OnEffect != "" {
+				params["effect"] = mapping.CustomFormula.OnEffect
+			}
+		} else {
+			if mapping.CustomFormula.OffService != "" {
+				params["service"] = mapping.CustomFormula.OffService
+			}
+			if mapping.CustomFormula.OffEffect != "" {
+				params["effect"] = mapping.CustomFormula.OffEffect
+			}
 		}
 	}
 

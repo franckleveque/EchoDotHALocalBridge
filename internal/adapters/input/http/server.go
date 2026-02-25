@@ -322,6 +322,8 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
                         '<div class="custom-fields" style="display: ' + (isCustom ? 'block' : 'none') + '">' +
                             'To Hue: <input type="text" class="to_hue" placeholder="x * 1" value="' + (mapping.custom_formula?.to_hue_formula || '') + '"><br>' +
                             'To HA: <input type="text" class="to_ha" placeholder="x / 1" value="' + (mapping.custom_formula?.to_ha_formula || '') + '"><br>' +
+                            'On Service: <input type="text" class="on_service" placeholder="camera.enable_motion_detection" value="' + (mapping.custom_formula?.on_service || '') + '"><br>' +
+                            'Off Service: <input type="text" class="off_service" placeholder="camera.disable_motion_detection" value="' + (mapping.custom_formula?.off_service || '') + '"><br>' +
                             'On Effect: <input type="text" class="on_effect" placeholder="domain.service" value="' + (mapping.custom_formula?.on_effect || '') + '"><br>' +
                             'Off Effect: <input type="text" class="off_effect" placeholder="domain.service" value="' + (mapping.custom_formula?.off_effect || '') + '">' +
                         '</div>' +
@@ -348,6 +350,8 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
                     custom_formula: {
                         to_hue_formula: tr.querySelector('.to_hue').value,
                         to_ha_formula: tr.querySelector('.to_ha').value,
+                        on_service: tr.querySelector('.on_service').value,
+                        off_service: tr.querySelector('.off_service').value,
                         on_effect: tr.querySelector('.on_effect').value,
                         off_effect: tr.querySelector('.off_effect').value
                     }

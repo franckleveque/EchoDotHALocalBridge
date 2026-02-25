@@ -12,8 +12,10 @@ const (
 type CustomFormula struct {
 	ToHueFormula string `json:"to_hue_formula"` // e.g. "x * 2.54"
 	ToHAFormula  string `json:"to_ha_formula"`  // e.g. "x / 2.54"
-	OnEffect     string `json:"on_effect"`     // optional extra command
-	OffEffect    string `json:"off_effect"`    // optional extra command
+	OnService    string `json:"on_service"`     // e.g. "camera.enable_motion_detection"
+	OffService   string `json:"off_service"`    // e.g. "camera.disable_motion_detection"
+	OnEffect     string `json:"on_effect"`      // optional extra command
+	OffEffect    string `json:"off_effect"`     // optional extra command
 }
 
 type EntityMapping struct {

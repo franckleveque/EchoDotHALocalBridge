@@ -77,6 +77,20 @@ func TestCustomStrategy(t *testing.T) {
 	hueState.Bri = 254
 	haParams := s.ToHA(hueState, mapping)
 	assert.InDelta(t, 100.0, haParams["value"].(float64), 0.1)
+
+	// Test dynamic service
+	mapping.CustomFormula.OnService = "camera.enable_motion"
+	hueState.On = true
+	haParams = s.ToHA(hueState, mapping)
+	assert.Equal(t, "camera.enable_motion", haParams["service"])
+
+	// Test Off Service and Effects
+	mapping.CustomFormula.OffService = "camera.disable_motion"
+	mapping.CustomFormula.OffEffect = "homeassistant.update_entity"
+	hueState.On = false
+	haParams = s.ToHA(hueState, mapping)
+	assert.Equal(t, "camera.disable_motion", haParams["service"])
+	assert.Equal(t, "homeassistant.update_entity", haParams["effect"])
 }
 
 func TestCustomStrategy_Evaluate(t *testing.T) {
