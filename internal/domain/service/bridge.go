@@ -6,7 +6,9 @@ import (
 	"hue-bridge-emulator/internal/domain/model"
 	"hue-bridge-emulator/internal/domain/translator"
 	"hue-bridge-emulator/internal/ports"
+	"strconv"
 	"sync"
+	"time"
 )
 
 type BridgeService struct {
@@ -15,18 +17,43 @@ type BridgeService struct {
 	translatorFactory *translator.Factory
 	devices           map[string]*model.Device
 	mu                sync.RWMutex
+	refreshMu         sync.Mutex
+	lastRefresh       time.Time
 }
 
 func NewBridgeService(haPort ports.HomeAssistantPort, configRepo ports.ConfigRepository) *BridgeService {
-	return &BridgeService{
+	s := &BridgeService{
 		haPort:            haPort,
 		configRepo:        configRepo,
 		translatorFactory: translator.NewFactory(),
 		devices:           make(map[string]*model.Device),
 	}
+	return s
+}
+
+func (s *BridgeService) Start(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				s.RefreshDevices(ctx)
+			case <-ctx.Done():
+				ticker.Stop()
+				return
+			}
+		}
+	}()
 }
 
 func (s *BridgeService) RefreshDevices(ctx context.Context) error {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+
+	if time.Since(s.lastRefresh) < 5*time.Second {
+		return nil
+	}
+
 	if !s.haPort.IsConfigured() {
 		return nil
 	}
@@ -65,6 +92,7 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 		}
 	}
 	s.devices = newDevices
+	s.lastRefresh = time.Now()
 	return nil
 }
 
@@ -115,7 +143,8 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 		tmpState.Bri = uint8(bri)
 	}
 
-	params := t.ToHA(&tmpState, device.Mapping)
+	service, params := t.ToHA(&tmpState, device.Mapping)
+	params["service"] = service
 
 	// Optimistic update under lock
 	if on, ok := hueStateUpdate["on"].(bool); ok {
@@ -156,11 +185,34 @@ func (s *BridgeService) GetConfig(ctx context.Context) (*model.Config, error) {
 }
 
 func (s *BridgeService) UpdateConfig(ctx context.Context, cfg *model.Config) error {
+	// Ensure stable Hue IDs
+	maxID := 0
+	for _, m := range cfg.EntityMappings {
+		if m.HueID != "" {
+			if id, err := strconv.Atoi(m.HueID); err == nil && id > maxID {
+				maxID = id
+			}
+		}
+	}
+
+	for _, m := range cfg.EntityMappings {
+		if m.HueID == "" {
+			maxID++
+			m.HueID = strconv.Itoa(maxID)
+		}
+	}
+
 	err := s.configRepo.Save(ctx, cfg)
 	if err != nil {
 		return err
 	}
 	s.haPort.Configure(cfg.HassURL, cfg.HassToken)
+
+	// Force refresh
+	s.refreshMu.Lock()
+	s.lastRefresh = time.Time{}
+	s.refreshMu.Unlock()
+
 	return s.RefreshDevices(ctx)
 }
 

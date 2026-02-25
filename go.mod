@@ -9,6 +9,7 @@ require (
 )
 
 require (
+	github.com/Knetic/govaluate v3.0.0+incompatible // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/fatih/color v1.16.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect

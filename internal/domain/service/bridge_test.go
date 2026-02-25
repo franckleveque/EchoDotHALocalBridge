@@ -119,6 +119,19 @@ func TestBridgeService_GetAllEntities(t *testing.T) {
 	assert.Equal(t, entities, res)
 }
 
+func TestBridgeService_GetDevices_Empty(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+
+	mockHA.On("IsConfigured").Return(false)
+
+	s := NewBridgeService(mockHA, mockRepo)
+	devices, err := s.GetDevices(context.Background())
+
+	assert.NoError(t, err)
+	assert.Len(t, devices, 0)
+}
+
 func TestBridgeService_Config(t *testing.T) {
 	mockHA := new(MockHAPort)
 	mockRepo := new(MockConfigRepo)
@@ -142,5 +155,53 @@ func TestBridgeService_Config(t *testing.T) {
 	assert.NoError(t, err)
 
 	mockRepo.AssertExpectations(t)
+	mockHA.AssertExpectations(t)
+}
+
+func TestBridgeService_UpdateConfigStableIDs(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+
+	cfg := &model.Config{
+		EntityMappings: map[string]*model.EntityMapping{
+			"light.1": {EntityID: "light.1", HueID: "10"},
+			"light.2": {EntityID: "light.2", HueID: ""},
+		},
+	}
+
+	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
+	mockRepo.On("Save", mock.Anything, mock.MatchedBy(func(c *model.Config) bool {
+		return c.EntityMappings["light.2"].HueID == "11"
+	})).Return(nil)
+	mockHA.On("Configure", mock.Anything, mock.Anything).Return()
+	mockHA.On("IsConfigured").Return(true)
+	mockHA.On("GetRawStates", mock.Anything).Return([]map[string]interface{}{}, nil)
+
+	s := NewBridgeService(mockHA, mockRepo)
+	err := s.UpdateConfig(context.Background(), cfg)
+	assert.NoError(t, err)
+
+	mockRepo.AssertExpectations(t)
+}
+
+func TestBridgeService_RefreshCooldown(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+
+	cfg := &model.Config{EntityMappings: make(map[string]*model.EntityMapping)}
+	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
+	mockHA.On("IsConfigured").Return(true)
+	mockHA.On("GetRawStates", mock.Anything).Return([]map[string]interface{}{}, nil).Once()
+
+	s := NewBridgeService(mockHA, mockRepo)
+
+	// First call
+	err := s.RefreshDevices(context.Background())
+	assert.NoError(t, err)
+
+	// Second call immediately - should skip (mock only expects one call to GetRawStates)
+	err = s.RefreshDevices(context.Background())
+	assert.NoError(t, err)
+
 	mockHA.AssertExpectations(t)
 }

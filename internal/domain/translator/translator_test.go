@@ -23,7 +23,8 @@ func TestLightStrategy(t *testing.T) {
 
 	// Hue to HA
 	hueState.Bri = 200
-	haParams := s.ToHA(hueState, mapping)
+	service, haParams := s.ToHA(hueState, mapping)
+	assert.Equal(t, "turn_on", service)
 	assert.Equal(t, uint8(200), haParams["brightness"])
 }
 
@@ -38,7 +39,8 @@ func TestCoverStrategy(t *testing.T) {
 	assert.Equal(t, uint8(127), hueState.Bri)
 
 	hueState.Bri = 254
-	haParams := s.ToHA(hueState, mapping)
+	service, haParams := s.ToHA(hueState, mapping)
+	assert.Equal(t, "set_cover_position", service)
 	assert.Equal(t, 100, haParams["position"])
 }
 
@@ -52,7 +54,8 @@ func TestClimateStrategy(t *testing.T) {
 	assert.Equal(t, uint8(169), hueState.Bri)
 
 	hueState.Bri = 254
-	haParams := s.ToHA(hueState, mapping)
+	service, haParams := s.ToHA(hueState, mapping)
+	assert.Equal(t, "set_temperature", service)
 	assert.Equal(t, 28.0, haParams["temperature"])
 }
 
@@ -75,21 +78,22 @@ func TestCustomStrategy(t *testing.T) {
 	assert.Equal(t, uint8(127), hueState.Bri)
 
 	hueState.Bri = 254
-	haParams := s.ToHA(hueState, mapping)
+	service, haParams := s.ToHA(hueState, mapping)
+	assert.Equal(t, "set_value", service)
 	assert.InDelta(t, 100.0, haParams["value"].(float64), 0.1)
 
 	// Test dynamic service
 	mapping.CustomFormula.OnService = "camera.enable_motion"
 	hueState.On = true
-	haParams = s.ToHA(hueState, mapping)
-	assert.Equal(t, "camera.enable_motion", haParams["service"])
+	service, haParams = s.ToHA(hueState, mapping)
+	assert.Equal(t, "camera.enable_motion", service)
 
 	// Test Off Service and Effects
 	mapping.CustomFormula.OffService = "camera.disable_motion"
 	mapping.CustomFormula.OffEffect = "homeassistant.update_entity"
 	hueState.On = false
-	haParams = s.ToHA(hueState, mapping)
-	assert.Equal(t, "camera.disable_motion", haParams["service"])
+	service, haParams = s.ToHA(hueState, mapping)
+	assert.Equal(t, "camera.disable_motion", service)
 	assert.Equal(t, "homeassistant.update_entity", haParams["effect"])
 }
 
@@ -99,6 +103,7 @@ func TestCustomStrategy_Evaluate(t *testing.T) {
 	assert.Equal(t, 5.0, s.evaluate("x / 2", 10))
 	assert.Equal(t, 15.0, s.evaluate("x + 5", 10))
 	assert.Equal(t, 5.0, s.evaluate("x - 5", 10))
+	// govaluate supports precedence, so x * 2 + 10 = 5 * 2 + 10 = 20
 	assert.Equal(t, 20.0, s.evaluate("x * 2 + 10", 5))
 }
 

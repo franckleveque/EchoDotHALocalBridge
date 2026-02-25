@@ -21,10 +21,11 @@ func (s *CoverStrategy) ToHue(haState map[string]interface{}, mapping *model.Ent
 	return state
 }
 
-func (s *CoverStrategy) ToHA(hueState *huego.State, mapping *model.EntityMapping) map[string]interface{} {
+func (s *CoverStrategy) ToHA(hueState *huego.State, mapping *model.EntityMapping) (string, map[string]interface{}) {
+	service := "set_cover_position"
 	params := make(map[string]interface{})
 	params["position"] = int(float64(hueState.Bri) / 2.54)
-	return params
+	return service, params
 }
 
 func (s *CoverStrategy) GetMetadata() model.HueMetadata {

@@ -21,13 +21,16 @@ func (s *LightStrategy) ToHue(haState map[string]interface{}, mapping *model.Ent
 	return state
 }
 
-func (s *LightStrategy) ToHA(hueState *huego.State, mapping *model.EntityMapping) map[string]interface{} {
+func (s *LightStrategy) ToHA(hueState *huego.State, mapping *model.EntityMapping) (string, map[string]interface{}) {
+	service := "turn_on"
+	if !hueState.On {
+		service = "turn_off"
+	}
 	params := make(map[string]interface{})
-	params["on"] = hueState.On
 	if hueState.Bri > 0 {
 		params["brightness"] = hueState.Bri
 	}
-	return params
+	return service, params
 }
 
 func (s *LightStrategy) GetMetadata() model.HueMetadata {

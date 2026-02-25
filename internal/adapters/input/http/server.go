@@ -343,7 +343,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
                 const entity_id = tr.querySelector('.exposed').dataset.id;
                 mappings[entity_id] = {
                     entity_id: entity_id,
-                    hue_id: currentConfig.entity_mappings[entity_id]?.hue_id || (Object.keys(mappings).length + 1).toString(),
+                    hue_id: currentConfig.entity_mappings[entity_id]?.hue_id || '',
                     name: tr.querySelector('.name').value,
                     type: tr.querySelector('.type').value,
                     exposed: tr.querySelector('.exposed').checked,

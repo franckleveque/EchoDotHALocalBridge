@@ -35,8 +35,12 @@ func main() {
 
 	// Load initial config if exists
 	cfg, err := configRepo.Get(context.Background())
-	if err == nil && cfg.HassURL != "" && cfg.HassToken != "" {
+	if err != nil {
+		log.Printf("Error loading config: %v", err)
+	}
+	if cfg.HassURL != "" && cfg.HassToken != "" {
 		haClient.Configure(cfg.HassURL, cfg.HassToken)
+		log.Printf("Home Assistant configured from persisted storage")
 	} else {
 		// Try env vars for initial config
 		hassURL := os.Getenv("HASS_URL")
@@ -46,10 +50,14 @@ func main() {
 			cfg.HassURL = hassURL
 			cfg.HassToken = hassToken
 			configRepo.Save(context.Background(), cfg)
+			log.Printf("Home Assistant configured from environment variables")
+		} else {
+			log.Printf("Home Assistant not configured. Please use the Web Admin interface.")
 		}
 	}
 
 	bridgeService := service.NewBridgeService(haClient, configRepo)
+	bridgeService.Start(context.Background())
 
 	// Start SSDP Server
 	ssdpServer := ssdp.NewServer(ip)

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Client struct {
@@ -16,6 +17,9 @@ type Client struct {
 	token      string
 	httpClient *http.Client
 	mu         sync.RWMutex
+
+	cacheStates []map[string]interface{}
+	cacheTime   time.Time
 }
 
 func NewClient() *Client {
@@ -38,53 +42,28 @@ func (c *Client) IsConfigured() bool {
 }
 
 func (c *Client) GetAllEntities(ctx context.Context) ([]*model.EntityMapping, error) {
-	c.mu.RLock()
-	url := c.url
-	token := c.token
-	c.mu.RUnlock()
-
-	if url == "" || token == "" {
-		return nil, fmt.Errorf("Home Assistant not configured")
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url+"/api/states", nil)
+	states, err := c.GetRawStates(ctx)
 	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	// Lightweight decoding to avoid storing huge attributes (like video streams/images)
-	var states []struct {
-		EntityID   string `json:"entity_id"`
-		Attributes struct {
-			FriendlyName string `json:"friendly_name"`
-		} `json:"attributes"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&states); err != nil {
 		return nil, err
 	}
 
 	var entities []*model.EntityMapping
 	for _, s := range states {
-		if !c.isSupported(s.EntityID) {
+		entityID, _ := s["entity_id"].(string)
+		if !c.isSupported(entityID) {
 			continue
 		}
 
-		name := s.Attributes.FriendlyName
+		attributes, _ := s["attributes"].(map[string]interface{})
+		name, _ := attributes["friendly_name"].(string)
 		if name == "" {
-			name = s.EntityID
+			name = entityID
 		}
 
 		entities = append(entities, &model.EntityMapping{
-			EntityID: s.EntityID,
+			EntityID: entityID,
 			Name:     name,
-			Type:     c.guessType(s.EntityID),
+			Type:     c.guessType(entityID),
 			Exposed:  false,
 		})
 	}
@@ -94,6 +73,11 @@ func (c *Client) GetAllEntities(ctx context.Context) ([]*model.EntityMapping, er
 
 func (c *Client) GetRawStates(ctx context.Context) ([]map[string]interface{}, error) {
 	c.mu.RLock()
+	if time.Since(c.cacheTime) < 2*time.Second {
+		res := c.cacheStates
+		c.mu.RUnlock()
+		return res, nil
+	}
 	url := c.url
 	token := c.token
 	c.mu.RUnlock()
@@ -125,6 +109,11 @@ func (c *Client) GetRawStates(ctx context.Context) ([]map[string]interface{}, er
 		return nil, err
 	}
 
+	c.mu.Lock()
+	c.cacheStates = states
+	c.cacheTime = time.Now()
+	c.mu.Unlock()
+
 	// Optional: strip very large attributes to save RAM
 	for _, s := range states {
 		if attr, ok := s["attributes"].(map[string]interface{}); ok {
@@ -149,59 +138,22 @@ func (c *Client) SetState(ctx context.Context, device *model.Device, params map[
 	}
 
 	domain := strings.Split(device.ExternalID, ".")[0]
-	service := "turn_on"
-	on, onProvided := params["on"].(bool)
+	service := params["service"].(string)
 
-	if onProvided && !on {
-		service = "turn_off"
-	}
-
-	// Dynamic Service override from parameters (via Custom Strategy) or Mapping
-	if svc, ok := params["service"].(string); ok && svc != "" {
-		serviceParts := strings.Split(svc, ".")
-		if len(serviceParts) == 2 {
-			domain = serviceParts[0]
-			service = serviceParts[1]
-		}
-	} else if device.Mapping != nil && device.Mapping.CustomFormula != nil {
-		if onProvided {
-			if on && device.Mapping.CustomFormula.OnService != "" {
-				serviceParts := strings.Split(device.Mapping.CustomFormula.OnService, ".")
-				if len(serviceParts) == 2 {
-					domain = serviceParts[0]
-					service = serviceParts[1]
-				}
-			} else if !on && device.Mapping.CustomFormula.OffService != "" {
-				serviceParts := strings.Split(device.Mapping.CustomFormula.OffService, ".")
-				if len(serviceParts) == 2 {
-					domain = serviceParts[0]
-					service = serviceParts[1]
-				}
-			}
-		}
+	serviceParts := strings.Split(service, ".")
+	if len(serviceParts) == 2 {
+		domain = serviceParts[0]
+		service = serviceParts[1]
 	}
 
 	payload := make(map[string]interface{})
 	for k, v := range params {
-		if k == "on" || k == "effect" || k == "service" {
+		if k == "effect" || k == "service" {
 			continue
 		}
 		payload[k] = v
 	}
 	payload["entity_id"] = device.ExternalID
-
-	// Fallback/Default behaviors if not overridden
-	if device.Mapping == nil || (onProvided && on && device.Mapping.CustomFormula != nil && device.Mapping.CustomFormula.OnService == "") || (onProvided && !on && device.Mapping.CustomFormula != nil && device.Mapping.CustomFormula.OffService == "") {
-		if device.Type == model.MappingTypeCover {
-			if _, ok := payload["position"]; ok {
-				service = "set_cover_position"
-			}
-		} else if device.Type == model.MappingTypeClimate {
-			if _, ok := payload["temperature"]; ok {
-				service = "set_temperature"
-			}
-		}
-	}
 
 	url := fmt.Sprintf("%s/api/services/%s/%s", url_base, domain, service)
 	body, _ := json.Marshal(payload)
@@ -234,21 +186,28 @@ func (c *Client) SetState(ctx context.Context, device *model.Device, params map[
 func (c *Client) executeEffect(ctx context.Context, effect, urlBase, token string) {
 	// effect is like "service.call" or just a service name if domain is known
 	parts := strings.Split(effect, ".")
-	if len(parts) < 2 { return }
+	if len(parts) < 2 {
+		return
+	}
 
 	url := fmt.Sprintf("%s/api/services/%s/%s", urlBase, parts[0], parts[1])
 	req, _ := http.NewRequestWithContext(ctx, "POST", url, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := c.httpClient.Do(req)
-	if err == nil {
-		resp.Body.Close()
+	if err != nil {
+		fmt.Printf("Error executing effect %s: %v\n", effect, err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		fmt.Printf("Effect %s returned status %d\n", effect, resp.StatusCode)
 	}
 }
 
 func (c *Client) isSupported(entityID string) bool {
 	// Accept almost all domains that could be useful for Alexa interaction
 	// including cameras, media players, and all input helpers.
-	ignoredDomains := []string{"automation.", "zone.", "person.", "sun.", "weather.", "sensor.", "binary_sensor.", "zone."}
+	ignoredDomains := []string{"automation.", "zone.", "person.", "sun.", "weather.", "sensor.", "binary_sensor."}
 	for _, domain := range ignoredDomains {
 		if strings.HasPrefix(entityID, domain) {
 			return false
