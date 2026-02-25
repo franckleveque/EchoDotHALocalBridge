@@ -7,7 +7,7 @@ import (
 
 // Translator defines the interface for translating between Hue and Home Assistant states
 type Translator interface {
-	ToHue(haState map[string]interface{}, mapping *model.EntityMapping) *huego.State
-	ToHA(hueState *huego.State, mapping *model.EntityMapping) (string, map[string]interface{})
+	ToHue(haState map[string]interface{}, vd *model.VirtualDevice) *huego.State
+	ToHA(hueState *huego.State, vd *model.VirtualDevice) (string, map[string]interface{})
 	GetMetadata() model.HueMetadata
 }

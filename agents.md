@@ -12,9 +12,9 @@
 
 ## Domain Logic
 
-*   The translation formulas are linear.
-*   The `CustomStrategy` evaluates formulas where `x` is the input value.
-*   The `BridgeService` handles the optimistic state update.
+*   **Virtual Devices**: The system supports multiple "virtual intentions" for a single Home Assistant entity.
+*   **Translation Engine**: The `CustomStrategy` evaluates formulas where `x` is the input value.
+*   **Bridge Service**: Handles optimistic state updates and stable numeric HueID generation.
 
 ## Compliance
 

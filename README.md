@@ -16,11 +16,11 @@ This bridge allows emulating a Philips Hue V1 Bridge to expose Home Assistant en
 
 Access the admin UI at `http://<IP>/admin`.
 - **General Config**: Set Home Assistant URL and Token.
-- **Home Assistant Devices**:
-  - List all discoverable entities.
-  - Check "Expose" to make an entity visible to Alexa.
-  - Select "Type" (Light, Cover, Climate, Custom).
-  - For "Custom", define "To Hue" and "To HA" formulas using `x` as variable.
+- **Virtual Devices**:
+  - Define "Virtual Intentions" for any Home Assistant entity.
+  - **Custom Actions**: Manually specify HA services (e.g., `script.my_script`) and JSON payloads for ON/OFF commands.
+  - **Formula Engine**: Use `x` as a variable to define linear mapping between Hue (0-254) and HA values.
+  - **Metadata**: Select device type (Light, Cover, Climate, Custom) to ensure correct Alexa icons and behavior.
 
 ## 📐 Architecture & SOLID
 

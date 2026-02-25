@@ -9,7 +9,7 @@ import (
 
 type CustomStrategy struct{}
 
-func (s *CustomStrategy) ToHue(haState map[string]interface{}, mapping *model.EntityMapping) *huego.State {
+func (s *CustomStrategy) ToHue(haState map[string]interface{}, vd *model.VirtualDevice) *huego.State {
 	state := &huego.State{}
 	valStr, _ := haState["state"].(string)
 	state.On = (valStr != "off" && valStr != "closed" && valStr != "unavailable")
@@ -23,11 +23,13 @@ func (s *CustomStrategy) ToHue(haState map[string]interface{}, mapping *model.En
 			input = v
 		} else if v, ok := attr["temperature"].(float64); ok {
 			input = v
+		} else if v, ok := attr["value"].(float64); ok {
+			input = v
 		}
 	}
 
-	if mapping.CustomFormula != nil && mapping.CustomFormula.ToHueFormula != "" {
-		state.Bri = uint8(s.evaluate(mapping.CustomFormula.ToHueFormula, input))
+	if vd.ActionConfig != nil && vd.ActionConfig.ToHueFormula != "" {
+		state.Bri = uint8(s.evaluate(vd.ActionConfig.ToHueFormula, input))
 	} else {
 		state.Bri = uint8(input)
 	}
@@ -36,7 +38,7 @@ func (s *CustomStrategy) ToHue(haState map[string]interface{}, mapping *model.En
 	return state
 }
 
-func (s *CustomStrategy) ToHA(hueState *huego.State, mapping *model.EntityMapping) (string, map[string]interface{}) {
+func (s *CustomStrategy) ToHA(hueState *huego.State, vd *model.VirtualDevice) (string, map[string]interface{}) {
 	service := "turn_on"
 	if !hueState.On {
 		service = "turn_off"
@@ -45,14 +47,14 @@ func (s *CustomStrategy) ToHA(hueState *huego.State, mapping *model.EntityMappin
 	params := make(map[string]interface{})
 	input := float64(hueState.Bri)
 	var output float64
-	if mapping.CustomFormula != nil && mapping.CustomFormula.ToHAFormula != "" {
-		output = s.evaluate(mapping.CustomFormula.ToHAFormula, input)
+	if vd.ActionConfig != nil && vd.ActionConfig.ToHAFormula != "" {
+		output = s.evaluate(vd.ActionConfig.ToHAFormula, input)
 	} else {
 		output = input
 	}
 
 	// Guessing attribute name based on entity domain if possible
-	domain := strings.Split(mapping.EntityID, ".")[0]
+	domain := strings.Split(vd.EntityID, ".")[0]
 	switch domain {
 	case "light":
 		params["brightness"] = output
@@ -69,20 +71,20 @@ func (s *CustomStrategy) ToHA(hueState *huego.State, mapping *model.EntityMappin
 		params["value"] = output
 	}
 
-	if mapping.CustomFormula != nil {
+	if vd.ActionConfig != nil {
 		if hueState.On {
-			if mapping.CustomFormula.OnService != "" {
-				service = mapping.CustomFormula.OnService
+			if vd.ActionConfig.OnService != "" {
+				service = vd.ActionConfig.OnService
 			}
-			if mapping.CustomFormula.OnEffect != "" {
-				params["effect"] = mapping.CustomFormula.OnEffect
+			if vd.ActionConfig.OnEffect != "" {
+				params["effect"] = vd.ActionConfig.OnEffect
 			}
 		} else {
-			if mapping.CustomFormula.OffService != "" {
-				service = mapping.CustomFormula.OffService
+			if vd.ActionConfig.OffService != "" {
+				service = vd.ActionConfig.OffService
 			}
-			if mapping.CustomFormula.OffEffect != "" {
-				params["effect"] = mapping.CustomFormula.OffEffect
+			if vd.ActionConfig.OffEffect != "" {
+				params["effect"] = vd.ActionConfig.OffEffect
 			}
 		}
 	}

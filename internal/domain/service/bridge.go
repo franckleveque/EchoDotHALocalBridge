@@ -6,6 +6,7 @@ import (
 	"hue-bridge-emulator/internal/domain/model"
 	"hue-bridge-emulator/internal/domain/translator"
 	"hue-bridge-emulator/internal/ports"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -50,7 +51,7 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 
-	if time.Since(s.lastRefresh) < 5*time.Second {
+	if time.Since(s.lastRefresh) < 2*time.Second {
 		return nil
 	}
 
@@ -68,27 +69,35 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 		return err
 	}
 
+	// Index HA states by entity_id
+	stateMap := make(map[string]map[string]interface{})
+	for _, state := range states {
+		if eid, ok := state["entity_id"].(string); ok {
+			stateMap[eid] = state
+		}
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	newDevices := make(map[string]*model.Device)
 
-	for _, state := range states {
-		entityID, _ := state["entity_id"].(string)
-		mapping, ok := cfg.EntityMappings[entityID]
-		if !ok || !mapping.Exposed {
-			continue
+	for _, vd := range cfg.VirtualDevices {
+		state := stateMap[vd.EntityID]
+		// If state is nil, we still create the device but it might be "offline" or have default values
+		if state == nil {
+			state = map[string]interface{}{"entity_id": vd.EntityID, "state": "unavailable"}
 		}
 
-		t := s.translatorFactory.GetTranslator(mapping.Type)
-		hueState := t.ToHue(state, mapping)
+		t := s.translatorFactory.GetTranslator(vd.Type)
+		hueState := t.ToHue(state, vd)
 
-		newDevices[mapping.HueID] = &model.Device{
-			ID:         mapping.HueID,
-			Name:       mapping.Name,
-			Type:       mapping.Type,
-			ExternalID: entityID,
-			State:      hueState,
-			Mapping:    mapping,
+		newDevices[vd.HueID] = &model.Device{
+			ID:            vd.HueID,
+			Name:          vd.Name,
+			Type:          vd.Type,
+			ExternalID:    vd.EntityID,
+			State:         hueState,
+			VirtualDevice: vd,
 		}
 	}
 	s.devices = newDevices
@@ -111,6 +120,14 @@ func (s *BridgeService) GetDevices(ctx context.Context) ([]*model.Device, error)
 	for _, d := range s.devices {
 		devices = append(devices, s.copyDevice(d))
 	}
+
+	// Stable sorting by HueID (numeric)
+	sort.Slice(devices, func(i, j int) bool {
+		idI, _ := strconv.Atoi(devices[i].ID)
+		idJ, _ := strconv.Atoi(devices[j].ID)
+		return idI < idJ
+	})
+
 	return devices, nil
 }
 
@@ -143,8 +160,22 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 		tmpState.Bri = uint8(bri)
 	}
 
-	service, params := t.ToHA(&tmpState, device.Mapping)
-	params["service"] = service
+	serviceName, params := t.ToHA(&tmpState, device.VirtualDevice)
+	params["service"] = serviceName
+	params["__is_on"] = tmpState.On
+
+	// Check NoOp before starting goroutine
+	vd := device.VirtualDevice
+	if vd.ActionConfig != nil {
+		if tmpState.On && vd.ActionConfig.NoOpOn {
+			s.mu.Unlock()
+			return nil
+		}
+		if !tmpState.On && vd.ActionConfig.NoOpOff {
+			s.mu.Unlock()
+			return nil
+		}
+	}
 
 	// Optimistic update under lock
 	if on, ok := hueStateUpdate["on"].(bool); ok {
@@ -187,18 +218,18 @@ func (s *BridgeService) GetConfig(ctx context.Context) (*model.Config, error) {
 func (s *BridgeService) UpdateConfig(ctx context.Context, cfg *model.Config) error {
 	// Ensure stable Hue IDs
 	maxID := 0
-	for _, m := range cfg.EntityMappings {
-		if m.HueID != "" {
-			if id, err := strconv.Atoi(m.HueID); err == nil && id > maxID {
+	for _, vd := range cfg.VirtualDevices {
+		if vd.HueID != "" {
+			if id, err := strconv.Atoi(vd.HueID); err == nil && id > maxID {
 				maxID = id
 			}
 		}
 	}
 
-	for _, m := range cfg.EntityMappings {
-		if m.HueID == "" {
+	for _, vd := range cfg.VirtualDevices {
+		if vd.HueID == "" {
 			maxID++
-			m.HueID = strconv.Itoa(maxID)
+			vd.HueID = strconv.Itoa(maxID)
 		}
 	}
 
@@ -216,6 +247,6 @@ func (s *BridgeService) UpdateConfig(ctx context.Context, cfg *model.Config) err
 	return s.RefreshDevices(ctx)
 }
 
-func (s *BridgeService) GetAllEntities(ctx context.Context) ([]*model.EntityMapping, error) {
+func (s *BridgeService) GetAllEntities(ctx context.Context) ([]ports.HomeAssistantEntity, error) {
 	return s.haPort.GetAllEntities(ctx)
 }

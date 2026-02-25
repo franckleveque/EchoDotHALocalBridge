@@ -7,11 +7,10 @@ import (
 
 type LightStrategy struct{}
 
-func (s *LightStrategy) ToHue(haState map[string]interface{}, mapping *model.EntityMapping) *huego.State {
+func (s *LightStrategy) ToHue(haState map[string]interface{}, vd *model.VirtualDevice) *huego.State {
 	state := &huego.State{}
-	if val, ok := haState["state"].(string); ok {
-		state.On = (val == "on")
-	}
+	val, _ := haState["state"].(string)
+	state.On = (val == "on")
 	if attr, ok := haState["attributes"].(map[string]interface{}); ok {
 		if bri, ok := attr["brightness"].(float64); ok {
 			state.Bri = uint8(bri)
@@ -21,7 +20,7 @@ func (s *LightStrategy) ToHue(haState map[string]interface{}, mapping *model.Ent
 	return state
 }
 
-func (s *LightStrategy) ToHA(hueState *huego.State, mapping *model.EntityMapping) (string, map[string]interface{}) {
+func (s *LightStrategy) ToHA(hueState *huego.State, vd *model.VirtualDevice) (string, map[string]interface{}) {
 	service := "turn_on"
 	if !hueState.On {
 		service = "turn_off"
@@ -30,6 +29,15 @@ func (s *LightStrategy) ToHA(hueState *huego.State, mapping *model.EntityMapping
 	if hueState.Bri > 0 {
 		params["brightness"] = hueState.Bri
 	}
+
+	if vd.ActionConfig != nil {
+		if hueState.On && vd.ActionConfig.OnService != "" {
+			service = vd.ActionConfig.OnService
+		} else if !hueState.On && vd.ActionConfig.OffService != "" {
+			service = vd.ActionConfig.OffService
+		}
+	}
+
 	return service, params
 }
 

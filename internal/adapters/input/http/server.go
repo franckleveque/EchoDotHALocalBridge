@@ -222,32 +222,38 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 <head>
     <title>Hue Bridge Emulator Admin</title>
     <style>
-        body { font-family: sans-serif; max-width: 1000px; margin: 40px auto; padding: 20px; line-height: 1.6; }
-        .tabs { display: flex; border-bottom: 1px solid #ccc; margin-bottom: 20px; }
+        body { font-family: sans-serif; max-width: 1200px; margin: 40px auto; padding: 20px; line-height: 1.6; background-color: #f4f4f9; }
+        .tabs { display: flex; border-bottom: 2px solid #007bff; margin-bottom: 20px; }
         .tab { padding: 10px 20px; cursor: pointer; border: 1px solid transparent; border-bottom: none; }
-        .tab.active { border-color: #ccc; border-radius: 4px 4px 0 0; background: #f9f9f9; font-weight: bold; }
-        .content { display: none; }
+        .tab.active { border-color: #007bff; border-radius: 4px 4px 0 0; background: white; font-weight: bold; color: #007bff; }
+        .content { display: none; padding: 20px; background: white; border: 1px solid #ccc; border-radius: 0 0 4px 4px; }
         .content.active { display: block; }
         label { display: block; margin-bottom: 5px; font-weight: bold; }
-        input[type="text"], input[type="password"], select { width: 100%; padding: 8px; margin-bottom: 20px; box-sizing: border-box; }
-        button { padding: 10px 15px; background: #007bff; color: white; border: none; cursor: pointer; }
+        input[type="text"], input[type="password"], select, textarea { width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+        button { padding: 10px 15px; background: #007bff; color: white; border: none; cursor: pointer; border-radius: 4px; }
         button:hover { background: #0056b3; }
+        button.delete { background: #dc3545; }
+        button.delete:hover { background: #c82333; }
         table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
-        #status { margin-top: 20px; padding: 10px; border-radius: 4px; display: none; }
-        .success { background: #d4edda; color: #155724; }
-        .error { background: #f8d7da; color: #721c24; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: #f8f9fa; }
+        .action-config { font-size: 0.9em; background: #fdfdfe; padding: 10px; border: 1px dashed #ccc; margin-top: 5px; }
+        #status { margin-top: 20px; padding: 10px; border-radius: 4px; display: none; position: fixed; bottom: 20px; right: 20px; z-index: 1000; }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .modal { display: none; position: fixed; z-index: 1001; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); }
+        .modal-content { background-color: white; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 600px; border-radius: 8px; }
     </style>
 </head>
 <body>
     <h1>Hue Bridge Emulator Admin</h1>
     <div class="tabs">
         <div class="tab active" onclick="showTab('general')">General Config</div>
-        <div class="tab" onclick="showTab('ha-devices')">Home Assistant Devices</div>
+        <div class="tab" onclick="showTab('virtual-devices')">Virtual Devices</div>
     </div>
 
     <div id="general" class="content active">
+        <h2>Connection</h2>
         <form id="configForm">
             <label for="hass_url">Home Assistant URL</label>
             <input type="text" id="hass_url" name="hass_url" placeholder="http://192.168.1.10:8123">
@@ -259,124 +265,220 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
         </form>
     </div>
 
-    <div id="ha-devices" class="content">
-        <button onclick="loadEntities()">Refresh Entities</button>
-        <p>Select entities to expose to Alexa and define their type.</p>
-        <table id="entitiesTable">
+    <div id="virtual-devices" class="content">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h2>Virtual Devices Mapping</h2>
+            <button onclick="openDeviceModal()">+ Add Virtual Device</button>
+        </div>
+        <table id="devicesTable">
             <thead>
                 <tr>
-                    <th>Expose</th>
-                    <th>Entity ID</th>
-                    <th>Name</th>
+                    <th>HueID</th>
+                    <th>Alexa Name</th>
+                    <th>HA Entity ID</th>
                     <th>Type</th>
-                    <th>Custom Formulas (if Custom type)</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody></tbody>
         </table>
-        <button onclick="saveMappings()">Save Device Mappings</button>
+        <button onclick="saveAll()">Save Configuration</button>
+    </div>
+
+    <div id="deviceModal" class="modal">
+        <div class="modal-content">
+            <h2 id="modalTitle">Device Configuration</h2>
+            <input type="hidden" id="edit_index">
+            <label>Alexa Name</label>
+            <input type="text" id="dev_name" placeholder="e.g. Salon Chauffage">
+            <label>HA Entity ID</label>
+            <input type="text" id="dev_entity" list="haEntities" placeholder="e.g. climate.salon">
+            <datalist id="haEntities"></datalist>
+            <label>Type</label>
+            <select id="dev_type">
+                <option value="light">Light</option>
+                <option value="cover">Cover</option>
+                <option value="climate">Climate</option>
+                <option value="custom">Custom</option>
+            </select>
+
+            <fieldset>
+                <legend>Actions Configuration</legend>
+                <label>ON Service</label>
+                <input type="text" id="on_service" placeholder="homeassistant.turn_on">
+                <label>ON Payload (JSON)</label>
+                <textarea id="on_payload" placeholder='{"brightness": 255}'></textarea>
+                <label><input type="checkbox" id="no_op_on"> No-Op for ON</label>
+
+                <hr>
+                <label>OFF Service</label>
+                <input type="text" id="off_service" placeholder="homeassistant.turn_off">
+                <label>OFF Payload (JSON)</label>
+                <textarea id="off_payload" placeholder='{}'></textarea>
+                <label><input type="checkbox" id="no_op_off"> No-Op for OFF</label>
+
+                <hr>
+                <label>DIM: To Hue formula (variable: x)</label>
+                <input type="text" id="to_hue" placeholder="x * 2.54">
+                <label>DIM: To HA formula (variable: x)</label>
+                <input type="text" id="to_ha" placeholder="x / 2.54">
+
+                <hr>
+                <label><input type="checkbox" id="omit_eid"> Omit entity_id in calls</label>
+            </fieldset>
+
+            <div style="margin-top: 20px; text-align: right;">
+                <button onclick="closeDeviceModal()">Cancel</button>
+                <button onclick="applyDeviceChanges()">Apply</button>
+            </div>
+        </div>
     </div>
 
     <div id="status"></div>
 
     <script>
-        let currentConfig = { entity_mappings: {} };
+        let config = { virtual_devices: [] };
 
         function showTab(id) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.content').forEach(c => c.classList.remove('active'));
-            document.querySelector('.tab[onclick="showTab(\''+id+'\')"]').classList.add('active');
+            const tab = document.querySelector('.tab[onclick="showTab(\''+id+'\')"]');
+            if (tab) tab.classList.add('active');
             document.getElementById(id).classList.add('active');
         }
 
-        async function loadConfig() {
+        async function loadData() {
             const res = await fetch('/admin/config');
-            currentConfig = await res.json();
-            if (!currentConfig.entity_mappings) currentConfig.entity_mappings = {};
-            document.getElementById('hass_url').value = currentConfig.hass_url || '';
-            document.getElementById('hass_token').value = currentConfig.hass_token || '';
+            config = await res.json();
+            if (!config.virtual_devices) config.virtual_devices = [];
+
+            document.getElementById('hass_url').value = config.hass_url || '';
+            document.getElementById('hass_token').value = config.hass_token || '';
+
+            renderDevices();
+            loadEntities();
         }
 
         async function loadEntities() {
             const res = await fetch('/admin/ha-entities');
             const entities = await res.json();
-            const tbody = document.querySelector('#entitiesTable tbody');
+            const dl = document.getElementById('haEntities');
+            dl.innerHTML = '';
+            entities.forEach(e => {
+                const opt = document.createElement('option');
+                opt.value = e.entity_id;
+                opt.textContent = e.friendly_name;
+                dl.appendChild(opt);
+            });
+        }
+
+        function renderDevices() {
+            const tbody = document.querySelector('#devicesTable tbody');
             tbody.innerHTML = '';
-
-            entities.forEach(ent => {
-                const mapping = currentConfig.entity_mappings[ent.entity_id] || ent;
+            config.virtual_devices.forEach((vd, index) => {
                 const tr = document.createElement('tr');
-                const isCustom = mapping.type === 'custom';
-                tr.innerHTML = '<td><input type="checkbox" class="exposed" data-id="' + ent.entity_id + '" ' + (mapping.exposed ? 'checked' : '') + '></td>' +
-                    '<td>' + ent.entity_id + '</td>' +
-                    '<td><input type="text" class="name" value="' + mapping.name + '"></td>' +
+                tr.innerHTML =
+                    '<td>' + (vd.hue_id || 'new') + '</td>' +
+                    '<td>' + vd.name + '</td>' +
+                    '<td>' + vd.entity_id + '</td>' +
+                    '<td>' + vd.type + '</td>' +
                     '<td>' +
-                        '<select class="type">' +
-                            '<option value="light" ' + (mapping.type === 'light' ? 'selected' : '') + '>Light</option>' +
-                            '<option value="cover" ' + (mapping.type === 'cover' ? 'selected' : '') + '>Cover</option>' +
-                            '<option value="climate" ' + (mapping.type === 'climate' ? 'selected' : '') + '>Climate</option>' +
-                            '<option value="custom" ' + (mapping.type === 'custom' ? 'selected' : '') + '>Custom</option>' +
-                        '</select>' +
-                    '</td>' +
-                    '<td>' +
-                        '<div class="custom-fields" style="display: ' + (isCustom ? 'block' : 'none') + '">' +
-                            'To Hue: <input type="text" class="to_hue" placeholder="x * 1" value="' + (mapping.custom_formula?.to_hue_formula || '') + '"><br>' +
-                            'To HA: <input type="text" class="to_ha" placeholder="x / 1" value="' + (mapping.custom_formula?.to_ha_formula || '') + '"><br>' +
-                            'On Service: <input type="text" class="on_service" placeholder="camera.enable_motion_detection" value="' + (mapping.custom_formula?.on_service || '') + '"><br>' +
-                            'Off Service: <input type="text" class="off_service" placeholder="camera.disable_motion_detection" value="' + (mapping.custom_formula?.off_service || '') + '"><br>' +
-                            'On Effect: <input type="text" class="on_effect" placeholder="domain.service" value="' + (mapping.custom_formula?.on_effect || '') + '"><br>' +
-                            'Off Effect: <input type="text" class="off_effect" placeholder="domain.service" value="' + (mapping.custom_formula?.off_effect || '') + '">' +
-                        '</div>' +
+                        '<button onclick="openDeviceModal(' + index + ')">Edit</button> ' +
+                        '<button class="delete" onclick="deleteDevice(' + index + ')">Delete</button>' +
                     '</td>';
-
-                tr.querySelector('.type').onchange = (e) => {
-                    tr.querySelector('.custom-fields').style.display = e.target.value === 'custom' ? 'block' : 'none';
-                };
-
                 tbody.appendChild(tr);
             });
         }
 
-        async function saveMappings() {
-            const mappings = {};
-            document.querySelectorAll('#entitiesTable tbody tr').forEach(tr => {
-                const entity_id = tr.querySelector('.exposed').dataset.id;
-                mappings[entity_id] = {
-                    entity_id: entity_id,
-                    hue_id: currentConfig.entity_mappings[entity_id]?.hue_id || '',
-                    name: tr.querySelector('.name').value,
-                    type: tr.querySelector('.type').value,
-                    exposed: tr.querySelector('.exposed').checked,
-                    custom_formula: {
-                        to_hue_formula: tr.querySelector('.to_hue').value,
-                        to_ha_formula: tr.querySelector('.to_ha').value,
-                        on_service: tr.querySelector('.on_service').value,
-                        off_service: tr.querySelector('.off_service').value,
-                        on_effect: tr.querySelector('.on_effect').value,
-                        off_effect: tr.querySelector('.off_effect').value
-                    }
-                };
-            });
-            currentConfig.entity_mappings = mappings;
+        function openDeviceModal(index = -1) {
+            document.getElementById('edit_index').value = index;
+            if (index >= 0) {
+                const d = config.virtual_devices[index];
+                document.getElementById('dev_name').value = d.name;
+                document.getElementById('dev_entity').value = d.entity_id;
+                document.getElementById('dev_type').value = d.type;
+                const ac = d.action_config || {};
+                document.getElementById('on_service').value = ac.on_service || '';
+                document.getElementById('on_payload').value = JSON.stringify(ac.on_payload || {}, null, 2);
+                document.getElementById('no_op_on').checked = ac.no_op_on || false;
+                document.getElementById('off_service').value = ac.off_service || '';
+                document.getElementById('off_payload').value = JSON.stringify(ac.off_payload || {}, null, 2);
+                document.getElementById('no_op_off').checked = ac.no_op_off || false;
+                document.getElementById('to_hue').value = ac.to_hue_formula || '';
+                document.getElementById('to_ha').value = ac.to_ha_formula || '';
+                document.getElementById('omit_eid').checked = ac.omit_entity_id || false;
+                document.getElementById('modalTitle').textContent = 'Edit Virtual Device';
+            } else {
+                document.getElementById('dev_name').value = '';
+                document.getElementById('dev_entity').value = '';
+                document.getElementById('dev_type').value = 'light';
+                document.getElementById('on_service').value = '';
+                document.getElementById('on_payload').value = '{}';
+                document.getElementById('no_op_on').checked = false;
+                document.getElementById('off_service').value = '';
+                document.getElementById('off_payload').value = '{}';
+                document.getElementById('no_op_off').checked = false;
+                document.getElementById('to_hue').value = '';
+                document.getElementById('to_ha').value = '';
+                document.getElementById('omit_eid').checked = false;
+                document.getElementById('modalTitle').textContent = 'Add Virtual Device';
+            }
+            document.getElementById('deviceModal').style.display = 'block';
+        }
 
+        function closeDeviceModal() {
+            document.getElementById('deviceModal').style.display = 'none';
+        }
+
+        function applyDeviceChanges() {
+            const index = parseInt(document.getElementById('edit_index').value);
+            const d = {
+                name: document.getElementById('dev_name').value,
+                entity_id: document.getElementById('dev_entity').value,
+                type: document.getElementById('dev_type').value,
+                action_config: {
+                    on_service: document.getElementById('on_service').value,
+                    on_payload: JSON.parse(document.getElementById('on_payload').value || '{}'),
+                    no_op_on: document.getElementById('no_op_on').checked,
+                    off_service: document.getElementById('off_service').value,
+                    off_payload: JSON.parse(document.getElementById('off_payload').value || '{}'),
+                    no_op_off: document.getElementById('no_op_off').checked,
+                    to_hue_formula: document.getElementById('to_hue').value,
+                    to_ha_formula: document.getElementById('to_ha').value,
+                    omit_entity_id: document.getElementById('omit_eid').checked
+                }
+            };
+            if (index >= 0) {
+                d.hue_id = config.virtual_devices[index].hue_id;
+                config.virtual_devices[index] = d;
+            } else {
+                config.virtual_devices.push(d);
+            }
+            renderDevices();
+            closeDeviceModal();
+        }
+
+        function deleteDevice(index) {
+            if (confirm('Delete this virtual device?')) {
+                config.virtual_devices.splice(index, 1);
+                renderDevices();
+            }
+        }
+
+        async function saveAll() {
+            config.hass_url = document.getElementById('hass_url').value;
+            config.hass_token = document.getElementById('hass_token').value;
             const res = await fetch('/admin/config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(currentConfig)
+                body: JSON.stringify(config)
             });
-            showStatus(res.ok ? 'Mappings saved!' : 'Error saving mappings');
+            showStatus(res.ok ? 'Configuration saved and applied!' : 'Error saving config');
         }
 
         document.getElementById('configForm').onsubmit = async (e) => {
             e.preventDefault();
-            currentConfig.hass_url = document.getElementById('hass_url').value;
-            currentConfig.hass_token = document.getElementById('hass_token').value;
-            const res = await fetch('/admin/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(currentConfig)
-            });
-            showStatus(res.ok ? 'General config saved!' : 'Error saving config');
+            await saveAll();
         };
 
         function showStatus(msg) {
@@ -384,9 +486,10 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
             s.textContent = msg;
             s.style.display = 'block';
             s.className = msg.includes('Error') ? 'error' : 'success';
+            setTimeout(() => { s.style.display = 'none'; }, 3000);
         }
 
-        loadConfig();
+        loadData();
     </script>
 </body>
 </html>
