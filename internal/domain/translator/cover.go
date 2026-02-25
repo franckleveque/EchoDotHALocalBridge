@@ -26,3 +26,11 @@ func (s *CoverStrategy) ToHA(hueState *huego.State, mapping *model.EntityMapping
 	params["position"] = int(float64(hueState.Bri) / 2.54)
 	return params
 }
+
+func (s *CoverStrategy) GetMetadata() model.HueMetadata {
+	return model.HueMetadata{
+		Type:             "Window covering device",
+		ModelID:          "LCT001",
+		ManufacturerName: "Philips",
+	}
+}

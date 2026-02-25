@@ -7,7 +7,6 @@ import (
 	"hue-bridge-emulator/internal/domain/translator"
 	"hue-bridge-emulator/internal/ports"
 	"sync"
-	"github.com/amimof/huego"
 )
 
 type BridgeService struct {
@@ -107,7 +106,8 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 
 	t := s.translatorFactory.GetTranslator(device.Type)
 
-	tmpState := &huego.State{}
+	// Create a temporary state merged with the current state to handle partial updates
+	tmpState := *device.State
 	if on, ok := hueStateUpdate["on"].(bool); ok {
 		tmpState.On = on
 	}
@@ -115,7 +115,7 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 		tmpState.Bri = uint8(bri)
 	}
 
-	params := t.ToHA(tmpState, device.Mapping)
+	params := t.ToHA(&tmpState, device.Mapping)
 
 	// Optimistic update under lock
 	if on, ok := hueStateUpdate["on"].(bool); ok {

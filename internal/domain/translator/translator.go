@@ -9,4 +9,5 @@ import (
 type Translator interface {
 	ToHue(haState map[string]interface{}, mapping *model.EntityMapping) *huego.State
 	ToHA(hueState *huego.State, mapping *model.EntityMapping) map[string]interface{}
+	GetMetadata() model.HueMetadata
 }

@@ -31,3 +31,11 @@ func (s *ClimateStrategy) ToHA(hueState *huego.State, mapping *model.EntityMappi
 	params["temperature"] = temp
 	return params
 }
+
+func (s *ClimateStrategy) GetMetadata() model.HueMetadata {
+	return model.HueMetadata{
+		Type:             "Dimmable light",
+		ModelID:          "LWB004",
+		ManufacturerName: "Philips",
+	}
+}

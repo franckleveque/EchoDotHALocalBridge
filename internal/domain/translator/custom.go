@@ -75,6 +75,14 @@ func (s *CustomStrategy) ToHA(hueState *huego.State, mapping *model.EntityMappin
 	return params
 }
 
+func (s *CustomStrategy) GetMetadata() model.HueMetadata {
+	return model.HueMetadata{
+		Type:             "Extended color light",
+		ModelID:          "LCT001",
+		ManufacturerName: "Philips",
+	}
+}
+
 // evaluate handles simple formulas like "x * 2.54" or "x / 2.54 + 7"
 func (s *CustomStrategy) evaluate(formula string, x float64) float64 {
 	formula = strings.ReplaceAll(formula, "x", fmt.Sprintf(" %f ", x))

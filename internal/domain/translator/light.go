@@ -29,3 +29,11 @@ func (s *LightStrategy) ToHA(hueState *huego.State, mapping *model.EntityMapping
 	}
 	return params
 }
+
+func (s *LightStrategy) GetMetadata() model.HueMetadata {
+	return model.HueMetadata{
+		Type:             "Extended color light",
+		ModelID:          "LCT001",
+		ManufacturerName: "Philips",
+	}
+}

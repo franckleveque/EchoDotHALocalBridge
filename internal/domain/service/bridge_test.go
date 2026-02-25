@@ -92,12 +92,16 @@ func TestBridgeService_UpdateDeviceState(t *testing.T) {
 	s := NewBridgeService(mockHA, mockRepo)
 	_, _ = s.GetDevices(context.Background()) // Load devices
 
-	err := s.UpdateDeviceState(context.Background(), "1", map[string]interface{}{"on": true, "bri": float64(254)})
+	// Partial update: just bri. It should remain "on" if it was already "on" or keep its state.
+	// But our mock devices starts as "off" in this test.
+	err := s.UpdateDeviceState(context.Background(), "1", map[string]interface{}{"bri": float64(254)})
 	assert.NoError(t, err)
 
 	// Check optimistic update on the device in memory (cached in service)
 	d, _ := s.GetDevice(context.Background(), "1")
-	assert.True(t, d.State.On)
+	assert.Equal(t, uint8(254), d.State.Bri)
+	// It should still be OFF because it was off and we didn't send "on": true
+	assert.False(t, d.State.On)
 
 	time.Sleep(100 * time.Millisecond)
 	mockHA.AssertExpectations(t)

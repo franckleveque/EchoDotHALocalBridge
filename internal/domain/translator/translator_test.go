@@ -88,6 +88,18 @@ func TestCustomStrategy_Evaluate(t *testing.T) {
 	assert.Equal(t, 20.0, s.evaluate("x * 2 + 10", 5))
 }
 
+func TestMetadata(t *testing.T) {
+	ls := &LightStrategy{}
+	assert.Equal(t, "Extended color light", ls.GetMetadata().Type)
+
+	cs := &ClimateStrategy{}
+	assert.Equal(t, "Dimmable light", cs.GetMetadata().Type)
+	assert.Equal(t, "LWB004", cs.GetMetadata().ModelID)
+
+	covs := &CoverStrategy{}
+	assert.Equal(t, "Window covering device", covs.GetMetadata().Type)
+}
+
 func TestFactory(t *testing.T) {
 	f := NewFactory()
 	assert.IsType(t, &LightStrategy{}, f.GetTranslator(model.MappingTypeLight))

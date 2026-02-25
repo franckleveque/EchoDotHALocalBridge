@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hue-bridge-emulator/internal/domain/model"
+	"hue-bridge-emulator/internal/domain/translator"
 	"hue-bridge-emulator/internal/ports"
 	"net/http"
 	"strings"
@@ -11,14 +12,16 @@ import (
 )
 
 type Server struct {
-	bridge ports.BridgePort
-	ip     string
+	bridge            ports.BridgePort
+	translatorFactory *translator.Factory
+	ip                string
 }
 
 func NewServer(bridge ports.BridgePort, ip string) *Server {
 	return &Server{
-		bridge: bridge,
-		ip:     ip,
+		bridge:            bridge,
+		translatorFactory: translator.NewFactory(),
+		ip:                ip,
 	}
 }
 
@@ -104,13 +107,15 @@ func (s *Server) handleFullState(w http.ResponseWriter, r *http.Request) {
 
 	lights := make(map[string]*huego.Light)
 	for _, d := range devices {
+		strategy := s.translatorFactory.GetTranslator(d.Type)
+		meta := strategy.GetMetadata()
 		lights[d.ID] = &huego.Light{
 			Name:             d.Name,
-			Type:             "Extended color light",
+			Type:             meta.Type,
 			State:            d.State,
-			ModelID:          "LCT001",
+			ModelID:          meta.ModelID,
 			UniqueID:         d.ID,
-			ManufacturerName: "Philips",
+			ManufacturerName: meta.ManufacturerName,
 		}
 	}
 
@@ -140,13 +145,15 @@ func (s *Server) handleGetLights(w http.ResponseWriter, r *http.Request) {
 
 	lights := make(map[string]*huego.Light)
 	for _, d := range devices {
+		strategy := s.translatorFactory.GetTranslator(d.Type)
+		meta := strategy.GetMetadata()
 		lights[d.ID] = &huego.Light{
 			Name:             d.Name,
-			Type:             "Extended color light",
+			Type:             meta.Type,
 			State:            d.State,
-			ModelID:          "LCT001",
+			ModelID:          meta.ModelID,
 			UniqueID:         d.ID,
-			ManufacturerName: "Philips",
+			ManufacturerName: meta.ManufacturerName,
 		}
 	}
 
@@ -161,13 +168,15 @@ func (s *Server) handleGetLight(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 
+	strategy := s.translatorFactory.GetTranslator(device.Type)
+	meta := strategy.GetMetadata()
 	l := &huego.Light{
 		Name:             device.Name,
-		Type:             "Extended color light",
+		Type:             meta.Type,
 		State:            device.State,
-		ModelID:          "LCT001",
+		ModelID:          meta.ModelID,
 		UniqueID:         device.ID,
-		ManufacturerName: "Philips",
+		ManufacturerName: meta.ManufacturerName,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
