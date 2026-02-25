@@ -79,12 +79,20 @@ func (s *CustomStrategy) ToHA(hueState *huego.State, vd *model.VirtualDevice) (s
 			if vd.ActionConfig.OnEffect != "" {
 				params["effect"] = vd.ActionConfig.OnEffect
 			}
+			// Merge custom ON payload
+			for k, v := range vd.ActionConfig.OnPayload {
+				params[k] = v
+			}
 		} else {
 			if vd.ActionConfig.OffService != "" {
 				service = vd.ActionConfig.OffService
 			}
 			if vd.ActionConfig.OffEffect != "" {
 				params["effect"] = vd.ActionConfig.OffEffect
+			}
+			// Merge custom OFF payload
+			for k, v := range vd.ActionConfig.OffPayload {
+				params[k] = v
 			}
 		}
 	}

@@ -432,16 +432,30 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 
         function applyDeviceChanges() {
             const index = parseInt(document.getElementById('edit_index').value);
+            let on_payload, off_payload;
+            try {
+                on_payload = JSON.parse(document.getElementById('on_payload').value || '{}');
+            } catch (e) {
+                alert('Invalid ON Payload JSON: ' + e.message);
+                return;
+            }
+            try {
+                off_payload = JSON.parse(document.getElementById('off_payload').value || '{}');
+            } catch (e) {
+                alert('Invalid OFF Payload JSON: ' + e.message);
+                return;
+            }
+
             const d = {
                 name: document.getElementById('dev_name').value,
                 entity_id: document.getElementById('dev_entity').value,
                 type: document.getElementById('dev_type').value,
                 action_config: {
                     on_service: document.getElementById('on_service').value,
-                    on_payload: JSON.parse(document.getElementById('on_payload').value || '{}'),
+                    on_payload: on_payload,
                     no_op_on: document.getElementById('no_op_on').checked,
                     off_service: document.getElementById('off_service').value,
-                    off_payload: JSON.parse(document.getElementById('off_payload').value || '{}'),
+                    off_payload: off_payload,
                     no_op_off: document.getElementById('no_op_off').checked,
                     to_hue_formula: document.getElementById('to_hue').value,
                     to_ha_formula: document.getElementById('to_ha').value,

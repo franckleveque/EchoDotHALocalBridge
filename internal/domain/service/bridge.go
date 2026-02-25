@@ -20,6 +20,7 @@ type BridgeService struct {
 	mu                sync.RWMutex
 	refreshMu         sync.Mutex
 	lastRefresh       time.Time
+	initialized       bool
 }
 
 func NewBridgeService(haPort ports.HomeAssistantPort, configRepo ports.ConfigRepository) *BridgeService {
@@ -51,7 +52,7 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 
-	if time.Since(s.lastRefresh) < 2*time.Second {
+	if time.Since(s.lastRefresh) < 2*time.Second && s.initialized {
 		return nil
 	}
 
@@ -83,7 +84,6 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 
 	for _, vd := range cfg.VirtualDevices {
 		state := stateMap[vd.EntityID]
-		// If state is nil, we still create the device but it might be "offline" or have default values
 		if state == nil {
 			state = map[string]interface{}{"entity_id": vd.EntityID, "state": "unavailable"}
 		}
@@ -102,20 +102,30 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 	}
 	s.devices = newDevices
 	s.lastRefresh = time.Now()
+	s.initialized = true
 	return nil
 }
 
 func (s *BridgeService) GetDevices(ctx context.Context) ([]*model.Device, error) {
 	s.mu.RLock()
-	if len(s.devices) == 0 {
+	if s.initialized {
+		devices := s.getDevicesLocked()
 		s.mu.RUnlock()
-		err := s.RefreshDevices(ctx)
-		if err != nil {
-			return nil, err
-		}
-		s.mu.RLock()
+		return devices, nil
 	}
+	s.mu.RUnlock()
+
+	if err := s.RefreshDevices(ctx); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
 	defer s.mu.RUnlock()
+	return s.getDevicesLocked(), nil
+}
+
+// getDevicesLocked returns the devices list, must be called with at least a read lock
+func (s *BridgeService) getDevicesLocked() []*model.Device {
 	devices := make([]*model.Device, 0, len(s.devices))
 	for _, d := range s.devices {
 		devices = append(devices, s.copyDevice(d))
@@ -127,8 +137,7 @@ func (s *BridgeService) GetDevices(ctx context.Context) ([]*model.Device, error)
 		idJ, _ := strconv.Atoi(devices[j].ID)
 		return idI < idJ
 	})
-
-	return devices, nil
+	return devices
 }
 
 func (s *BridgeService) GetDevice(ctx context.Context, id string) (*model.Device, error) {
@@ -162,7 +171,6 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 
 	serviceName, params := t.ToHA(&tmpState, device.VirtualDevice)
 	params["service"] = serviceName
-	params["__is_on"] = tmpState.On
 
 	// Check NoOp before starting goroutine
 	vd := device.VirtualDevice

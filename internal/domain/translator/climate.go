@@ -33,10 +33,20 @@ func (s *ClimateStrategy) ToHA(hueState *huego.State, vd *model.VirtualDevice) (
 	params["temperature"] = temp
 
 	if vd.ActionConfig != nil {
-		if hueState.On && vd.ActionConfig.OnService != "" {
-			service = vd.ActionConfig.OnService
-		} else if !hueState.On && vd.ActionConfig.OffService != "" {
-			service = vd.ActionConfig.OffService
+		if hueState.On {
+			if vd.ActionConfig.OnService != "" {
+				service = vd.ActionConfig.OnService
+			}
+			for k, v := range vd.ActionConfig.OnPayload {
+				params[k] = v
+			}
+		} else {
+			if vd.ActionConfig.OffService != "" {
+				service = vd.ActionConfig.OffService
+			}
+			for k, v := range vd.ActionConfig.OffPayload {
+				params[k] = v
+			}
 		}
 	}
 

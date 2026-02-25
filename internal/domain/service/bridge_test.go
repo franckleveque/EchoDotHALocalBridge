@@ -53,6 +53,41 @@ func (m *MockConfigRepo) Save(ctx context.Context, config *model.Config) error {
 	return args.Error(0)
 }
 
+func TestBridgeService_PayloadMerging(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+	vd := &model.VirtualDevice{
+		HueID:    "1",
+		Name:     "Payload Test",
+		EntityID: "camera.salon",
+		Type:     model.MappingTypeCustom,
+		ActionConfig: &model.ActionConfig{
+			OnService: "camera.record",
+			OnPayload: map[string]interface{}{"duration": 30.0},
+		},
+	}
+
+	cfg := &model.Config{VirtualDevices: []*model.VirtualDevice{vd}}
+	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
+	mockHA.On("IsConfigured").Return(true)
+	mockHA.On("GetRawStates", mock.Anything).Return([]map[string]interface{}{
+		{"entity_id": "camera.salon", "state": "idle"},
+	}, nil)
+
+	mockHA.On("SetState", mock.Anything, mock.Anything, mock.MatchedBy(func(p map[string]interface{}) bool {
+		return p["service"] == "camera.record" && p["duration"] == 30.0
+	})).Return(nil)
+
+	s := NewBridgeService(mockHA, mockRepo)
+	_, _ = s.GetDevices(context.Background())
+
+	err := s.UpdateDeviceState(context.Background(), "1", map[string]interface{}{"on": true})
+	assert.NoError(t, err)
+
+	time.Sleep(50 * time.Millisecond)
+	mockHA.AssertExpectations(t)
+}
+
 func TestBridgeService_NoOpAndPayload(t *testing.T) {
 	mockHA := new(MockHAPort)
 	mockRepo := new(MockConfigRepo)
@@ -102,7 +137,9 @@ func TestBridgeService_OmitEntityID(t *testing.T) {
 	mockHA.On("IsConfigured").Return(true)
 	mockHA.On("GetRawStates", mock.Anything).Return([]map[string]interface{}{}, nil)
 
-	mockHA.On("SetState", mock.Anything, mock.Anything, mock.MatchedBy(func(p map[string]interface{}) bool {
+	mockHA.On("SetState", mock.Anything, mock.MatchedBy(func(d *model.Device) bool {
+		return d.ExternalID == "script.test"
+	}), mock.MatchedBy(func(p map[string]interface{}) bool {
 		_, exists := p["entity_id"]
 		return !exists
 	})).Return(nil)
@@ -150,6 +187,11 @@ func TestBridgeService_GetDevices(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, devices, 1)
 	assert.Equal(t, "Test Light", devices[0].Name)
+
+	// Test initialized path
+	devices2, err := s.GetDevices(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, devices[0].Name, devices2[0].Name)
 }
 
 func TestBridgeService_MultiIntentions(t *testing.T) {
@@ -200,7 +242,7 @@ func TestBridgeService_UpdateDeviceState(t *testing.T) {
 	}, nil)
 
 	mockHA.On("SetState", mock.Anything, mock.Anything, mock.MatchedBy(func(p map[string]interface{}) bool {
-		return p["service"] == "turn_on" && p["__is_on"] == true
+		return p["service"] == "turn_on"
 	})).Return(nil)
 
 	s := NewBridgeService(mockHA, mockRepo)
