@@ -215,11 +215,12 @@ func (s *Server) handleSetLightState(w http.ResponseWriter, r *http.Request, id 
 }
 
 func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprint(w, `
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
     <title>Hue Bridge Emulator Admin</title>
     <style>
         body { font-family: sans-serif; max-width: 1200px; margin: 40px auto; padding: 20px; line-height: 1.6; background-color: #f4f4f9; }
@@ -241,8 +242,8 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
         #status { margin-top: 20px; padding: 10px; border-radius: 4px; display: none; position: fixed; bottom: 20px; right: 20px; z-index: 1000; }
         .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
         .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .modal { display: none; position: fixed; z-index: 1001; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); }
-        .modal-content { background-color: white; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 600px; border-radius: 8px; }
+        .modal { display: none; position: fixed; z-index: 1001; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); overflow-y: auto; }
+        .modal-content { background-color: white; margin: 2vh auto; padding: 20px; border: 1px solid #888; width: 90%; max-width: 600px; border-radius: 8px; max-height: 90vh; overflow-y: auto; }
     </style>
 </head>
 <body>
@@ -292,8 +293,12 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
             <label>Alexa Name</label>
             <input type="text" id="dev_name" placeholder="e.g. Salon Chauffage">
             <label>HA Entity ID</label>
-            <input type="text" id="dev_entity" list="haEntities" placeholder="e.g. climate.salon">
-            <datalist id="haEntities"></datalist>
+            <div style="display: flex; gap: 5px;">
+                <select id="dev_entity" style="flex-grow: 1;">
+                    <option value="">-- Select an Entity --</option>
+                </select>
+                <button type="button" onclick="loadEntities()" title="Refresh entities" style="padding: 5px 10px; margin-bottom: 10px;">Refresh</button>
+            </div>
             <label>Type</label>
             <select id="dev_type">
                 <option value="light">Light</option>
@@ -338,6 +343,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 
     <script>
         let config = { virtual_devices: [] };
+        let allEntities = [];
 
         function showTab(id) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -360,16 +366,39 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
         }
 
         async function loadEntities() {
-            const res = await fetch('/admin/ha-entities');
-            const entities = await res.json();
-            const dl = document.getElementById('haEntities');
-            dl.innerHTML = '';
-            entities.forEach(e => {
+            try {
+                const res = await fetch('/admin/ha-entities');
+                if (!res.ok) throw new Error('Failed to fetch entities');
+                allEntities = await res.json();
+                allEntities.sort((a, b) => (a.friendly_name || '').localeCompare(b.friendly_name || ''));
+                renderEntitySelect();
+            } catch (e) {
+                console.error('Error loading entities:', e);
+            }
+        }
+
+        function renderEntitySelect(selectedValue = '') {
+            const sel = document.getElementById('dev_entity');
+
+            sel.innerHTML = '<option value="">-- Select an Entity --</option>';
+
+            // Add existing entities from discovery
+            allEntities.forEach(e => {
                 const opt = document.createElement('option');
                 opt.value = e.entity_id;
-                opt.textContent = e.friendly_name;
-                dl.appendChild(opt);
+                opt.textContent = e.friendly_name + ' (' + e.entity_id + ')';
+                sel.appendChild(opt);
             });
+
+            // If selectedValue is not in discovered entities, add it as a placeholder
+            if (selectedValue && !allEntities.find(e => e.entity_id === selectedValue)) {
+                const opt = document.createElement('option');
+                opt.value = selectedValue;
+                opt.textContent = '⚠️ ' + selectedValue + ' (unreachable)';
+                sel.appendChild(opt);
+            }
+
+            if (selectedValue) sel.value = selectedValue;
         }
 
         function renderDevices() {
@@ -395,7 +424,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
             if (index >= 0) {
                 const d = config.virtual_devices[index];
                 document.getElementById('dev_name').value = d.name;
-                document.getElementById('dev_entity').value = d.entity_id;
+                renderEntitySelect(d.entity_id);
                 document.getElementById('dev_type').value = d.type;
                 const ac = d.action_config || {};
                 document.getElementById('on_service').value = ac.on_service || '';
@@ -410,7 +439,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
                 document.getElementById('modalTitle').textContent = 'Edit Virtual Device';
             } else {
                 document.getElementById('dev_name').value = '';
-                document.getElementById('dev_entity').value = '';
+                renderEntitySelect('');
                 document.getElementById('dev_type').value = 'light';
                 document.getElementById('on_service').value = '';
                 document.getElementById('on_payload').value = '{}';
@@ -487,7 +516,12 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(config)
             });
-            showStatus(res.ok ? 'Configuration saved and applied!' : 'Error saving config');
+            if (res.ok) {
+                showStatus('Configuration saved and applied!');
+                await loadEntities();
+            } else {
+                showStatus('Error saving config');
+            }
         }
 
         document.getElementById('configForm').onsubmit = async (e) => {
