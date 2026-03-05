@@ -1,0 +1,14 @@
+services:
+  hue-bridge-emulator:
+    build: .
+    container_name: hue-bridge-emulator
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./data:/data
+    environment:
+      - HASS_URL=${HASS_URL}
+      - HASS_TOKEN=${HASS_TOKEN}
+      - CONFIG_PATH=/data/config.json
+    cap_add:
+      - NET_BIND_SERVICE

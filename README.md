@@ -39,7 +39,24 @@ ArchUnit is used to enforce architectural boundaries. Domain coverage is strictl
 
 ## 📦 Deployment
 
-Optimized for **Talos Cluster**:
+Optimized for **Talos Cluster** and **Raspberry Pi**:
 - `hostNetwork: true` for SSDP.
 - `CAP_NET_BIND_SERVICE` for port 80.
 - `scratch` base image for security.
+
+### 🍓 Raspberry Pi Deployment (Docker Compose)
+
+The easiest way to run the bridge on a Raspberry Pi is using Docker Compose.
+
+1.  **Clone the repo** on your RPi.
+2.  **Create a `.env` file** with your Home Assistant details:
+    ```bash
+    HASS_URL=http://<HA_IP>:8123
+    HASS_TOKEN=your_long_lived_access_token
+    ```
+3.  **Deploy**:
+    ```bash
+    docker-compose up -d
+    ```
+
+The bridge uses `network_mode: host` to allow Alexa discovery via SSDP and binds to port 80. Ensure no other service (like Nginx or Apache) is using port 80 on your RPi.
