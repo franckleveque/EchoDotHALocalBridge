@@ -34,7 +34,33 @@ func (s *Server) ListenAndServe(addr string) error {
 	mux.HandleFunc("/admin", s.handleAdmin)
 	mux.HandleFunc("/admin/config", s.handleConfig)
 	mux.HandleFunc("/admin/ha-entities", s.handleHAEntities)
+	mux.HandleFunc("/admin/test-action", s.handleAdminTestAction)
 	return http.ListenAndServe(addr, mux)
+}
+
+func (s *Server) handleAdminTestAction(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		VirtualDevice *model.VirtualDevice   `json:"virtual_device"`
+		StateUpdate   map[string]interface{} `json:"state_update"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	err := s.bridge.TestDeviceAction(r.Context(), req.VirtualDevice, req.StateUpdate)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -287,6 +313,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
                     <th>Alexa Name</th>
                     <th>HA Entity ID</th>
                     <th>Type</th>
+                    <th>Test Actions</th>
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -315,6 +342,15 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
                 <option value="climate">Climate</option>
                 <option value="custom">Custom</option>
             </select>
+
+            <div id="modal_test_actions" style="margin-bottom: 20px; padding: 10px; border: 1px dashed #007bff; border-radius: 4px;">
+                <label>Test Current Device (Real-time)</label>
+                <div style="display: flex; gap: 10px;">
+                    <button type="button" onclick="testCurrentForm({on: true})">On</button>
+                    <button type="button" onclick="testCurrentForm({on: false})">Off</button>
+                    <button type="button" onclick="testCurrentForm({bri: 127})">Dim 50%</button>
+                </div>
+            </div>
 
             <fieldset id="advanced_config">
                 <legend>Custom Actions Configuration</legend>
@@ -416,17 +452,92 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
             config.virtual_devices.forEach((vd, index) => {
                 const tr = document.createElement('tr');
                 const hueId = vd.hue_id || '';
+                const testButtons = hueId ?
+                    '<button onclick="testAction(\''+hueId+'\', {on: true})">On</button> ' +
+                    '<button onclick="testAction(\''+hueId+'\', {on: false})">Off</button> ' +
+                    '<button onclick="testAction(\''+hueId+'\', {bri: 127})">Dim 50%</button>' :
+                    '<span style="color: #666; font-style: italic;">Save config first</span>';
+
                 tr.innerHTML =
                     '<td>' + (hueId || 'new') + '</td>' +
                     '<td>' + vd.name + '</td>' +
                     '<td>' + vd.entity_id + '</td>' +
                     '<td>' + vd.type + '</td>' +
+                    '<td>' + testButtons + '</td>' +
                     '<td>' +
                         '<button onclick="openDeviceModal(' + index + ')">Edit</button> ' +
                         '<button class="delete" onclick="deleteDevice(' + index + ')">Delete</button>' +
                     '</td>';
                 tbody.appendChild(tr);
             });
+        }
+
+        async function testAction(hueId, state) {
+            try {
+                const res = await fetch('/api/admin/lights/' + hueId + '/state', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(state)
+                });
+                if (res.ok) {
+                    showStatus('Action sent successfully');
+                } else {
+                    showStatus('Error sending action');
+                }
+            } catch (e) {
+                showStatus('Error: ' + e.message);
+            }
+        }
+
+        async function testCurrentForm(stateUpdate) {
+            let on_payload, off_payload;
+            try {
+                on_payload = JSON.parse(document.getElementById('on_payload').value || '{}');
+            } catch (e) {
+                alert('Invalid ON Payload JSON: ' + e.message);
+                return;
+            }
+            try {
+                off_payload = JSON.parse(document.getElementById('off_payload').value || '{}');
+            } catch (e) {
+                alert('Invalid OFF Payload JSON: ' + e.message);
+                return;
+            }
+
+            const vd = {
+                name: document.getElementById('dev_name').value,
+                entity_id: document.getElementById('dev_entity').value,
+                type: document.getElementById('dev_type').value,
+                action_config: {
+                    on_service: document.getElementById('on_service').value,
+                    on_payload: on_payload,
+                    no_op_on: document.getElementById('no_op_on').checked,
+                    off_service: document.getElementById('off_service').value,
+                    off_payload: off_payload,
+                    no_op_off: document.getElementById('no_op_off').checked,
+                    to_hue_formula: document.getElementById('to_hue').value,
+                    to_ha_formula: document.getElementById('to_ha').value,
+                    omit_entity_id: document.getElementById('omit_eid').checked
+                }
+            };
+
+            try {
+                const res = await fetch('/admin/test-action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        virtual_device: vd,
+                        state_update: stateUpdate
+                    })
+                });
+                if (res.ok) {
+                    showStatus('Test action sent successfully');
+                } else {
+                    showStatus('Error sending test action');
+                }
+            } catch (e) {
+                showStatus('Error: ' + e.message);
+            }
         }
 
         function toggleAdvanced() {

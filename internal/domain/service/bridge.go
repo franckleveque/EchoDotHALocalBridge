@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"github.com/amimof/huego"
 )
 
 type BridgeService struct {
@@ -46,6 +47,46 @@ func (s *BridgeService) Start(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+func (s *BridgeService) TestDeviceAction(ctx context.Context, vd *model.VirtualDevice, hueStateUpdate map[string]interface{}) error {
+	t := s.translatorFactory.GetTranslator(vd.Type)
+
+	// Create a dummy current state
+	currentHueState := &huego.State{
+		On:  false,
+		Bri: 254,
+	}
+
+	// Apply updates
+	if on, ok := hueStateUpdate["on"].(bool); ok {
+		currentHueState.On = on
+	}
+	if bri, ok := hueStateUpdate["bri"].(float64); ok {
+		currentHueState.Bri = uint8(bri)
+	}
+
+	serviceName, params := t.ToHA(currentHueState, vd)
+	params["service"] = serviceName
+
+	// Create a dummy device for SetState
+	dummyDevice := &model.Device{
+		ID:            "test",
+		Name:          vd.Name,
+		Type:          vd.Type,
+		ExternalID:    vd.EntityID,
+		State:         currentHueState,
+		VirtualDevice: vd,
+	}
+
+	go func() {
+		err := s.haPort.SetState(context.Background(), dummyDevice, params)
+		if err != nil {
+			fmt.Printf("Error setting HA test state: %v\n", err)
+		}
+	}()
+
+	return nil
 }
 
 func (s *BridgeService) RefreshDevices(ctx context.Context) error {
