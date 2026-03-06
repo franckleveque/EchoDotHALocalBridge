@@ -430,8 +430,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
             allEntities.forEach(e => {
                 const opt = document.createElement('option');
                 opt.value = e.entity_id;
-                const domain = e.entity_id.split('.')[0];
-                opt.textContent = '[' + domain.toUpperCase() + '] ' + e.friendly_name + ' (' + e.entity_id + ')';
+                opt.textContent = e.friendly_name;
                 sel.appendChild(opt);
             });
 

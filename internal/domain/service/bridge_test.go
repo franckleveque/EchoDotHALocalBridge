@@ -305,6 +305,30 @@ func TestBridgeService_Config(t *testing.T) {
 	mockHA.AssertExpectations(t)
 }
 
+func TestBridgeService_TestDeviceAction(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+
+	vd := &model.VirtualDevice{
+		Name:     "Test Light",
+		EntityID: "light.test",
+		Type:     model.MappingTypeLight,
+	}
+
+	mockHA.On("SetState", mock.Anything, mock.MatchedBy(func(d *model.Device) bool {
+		return d.Name == "Test Light" && d.ExternalID == "light.test"
+	}), mock.MatchedBy(func(p map[string]interface{}) bool {
+		return p["service"] == "turn_on"
+	})).Return(nil)
+
+	s := NewBridgeService(mockHA, mockRepo)
+	err := s.TestDeviceAction(context.Background(), vd, map[string]interface{}{"on": true})
+	assert.NoError(t, err)
+
+	time.Sleep(50 * time.Millisecond)
+	mockHA.AssertExpectations(t)
+}
+
 func TestBridgeService_RefreshCooldown(t *testing.T) {
 	mockHA := new(MockHAPort)
 	mockRepo := new(MockConfigRepo)
