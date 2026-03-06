@@ -53,42 +53,34 @@ The bridge is designed to run on a dedicated **Raspberry Pi 3** to avoid port 80
     - Configure your Wi-Fi (if not using Ethernet).
 5.  **Write**: Flash the SD card and insert it into your Raspberry Pi 3.
 
-### 🐋 Phase 2: Docker Setup
+### 🚀 Phase 2: One-Click Installation (Windows PowerShell)
 
-Once logged into your RPi via SSH:
+No Git or Docker setup is required on your RPi beforehand. The installation is performed from your computer using a PowerShell script that builds the image locally and transfers it to the RPi.
 
-```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
+#### Prerequisites (Computer):
+- **Docker Desktop** (with Buildx enabled) installed.
+- **SSH client** (standard in Windows 10/11).
 
-# Install Docker
-curl -sSL https://get.docker.com | sh
-
-# Add your user to the docker group
-sudo usermod -aG docker $USER
-# (Log out and back in for this to take effect)
-
-# Install Docker Compose
-sudo apt install -y docker-compose-plugin
-```
-
-### 🚀 Phase 3: Bridge Deployment
-
-1.  **Clone the repository**:
-    ```bash
-    git clone https://github.com/your-repo/hue-bridge-emulator.git
-    cd hue-bridge-emulator
+1.  **Download the repository** on your computer.
+2.  **Open PowerShell** (version 5.1 or later).
+3.  **Navigate to the repository folder**:
+    ```powershell
+    cd path\to\hue-bridge-emulator
     ```
-2.  **Configure environment**:
-    Create a `.env` file:
-    ```bash
-    HASS_URL=http://<YOUR_HA_IP>:8123
-    HASS_TOKEN=your_long_lived_access_token
+4.  **Run the installation script**:
+    ```powershell
+    .\scripts\install-rpi.ps1
     ```
-3.  **Deploy**:
-    ```bash
-    docker compose up -d
-    ```
+5.  **Follow the prompts**:
+    - Enter the **IP address** of your RPi.
+    - Enter the **Username** (default is `pi`).
+    - The script will build the Docker image, transfer it via SCP, and install all necessary dependencies on the RPi automatically.
+
+### ⚙️ Phase 3: Configuration
+
+Once installed, access the admin panel at **`http://<RPi_IP>/admin`**.
+- Go to the **Settings** section.
+- Provide your **Home Assistant URL** and **Long-Lived Access Token**.
 
 ### ⚠️ Important Notes
 - **Port 80**: The bridge **must** use port 80 for Alexa discovery. Ensure no other service (Nginx, Apache, etc.) is running on your RPi.
