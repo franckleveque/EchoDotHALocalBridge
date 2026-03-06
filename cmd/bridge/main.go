@@ -11,15 +11,23 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 )
 
 func main() {
 	ip := os.Getenv("LOCAL_IP")
-	if ip == "" {
-		ip = getLocalIP()
+	if ip != "" {
+		log.Printf("Using LOCAL_IP from environment: %s", ip)
+	} else {
+		preferred := os.Getenv("PREFERRED_NETWORK")
+		ip = getLocalIP(preferred)
+		if ip != "" {
+			log.Printf("Automatically discovered local IP: %s", ip)
+		}
 	}
+
 	if ip == "" {
-		log.Fatal("Could not determine local IP. Set LOCAL_IP environment variable.")
+		log.Fatal("Could not determine local IP. Set LOCAL_IP environment variable (e.g. LOCAL_IP=192.168.1.10) or PREFERRED_NETWORK (e.g. PREFERRED_NETWORK=192.168.1.0/24).")
 	}
 
 	fmt.Printf("Starting Hue Bridge Emulator on %s\n", ip)
@@ -73,19 +81,30 @@ func main() {
 		port = "80"
 	}
 	httpServer := http.NewServer(bridgeService, ip)
-	log.Printf("HTTP Server listening on :%s", port)
+	log.Printf("HTTP Server listening on 0.0.0.0:%s (all interfaces)", port)
 	if err := httpServer.ListenAndServe(":"+port); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func getLocalIP() string {
+func getLocalIP(preferredNet string) string {
+	var preferredSubnet *net.IPNet
+	if preferredNet != "" {
+		_, subnet, err := net.ParseCIDR(preferredNet)
+		if err == nil {
+			preferredSubnet = subnet
+			log.Printf("Searching for IP in preferred network: %s", preferredNet)
+		}
+	}
+
 	interfaces, err := net.Interfaces()
 	if err != nil {
 		return ""
 	}
 
+	var bestIP string
 	for _, iface := range interfaces {
+		// Skip down and loopback
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
 			continue
 		}
@@ -113,8 +132,26 @@ func getLocalIP() string {
 				continue
 			}
 
-			return ip.String()
+			log.Printf("Found IPv4 address %s on interface %s", ip.String(), iface.Name)
+
+			// If we have a preferred network, check if this IP belongs to it
+			if preferredSubnet != nil && preferredSubnet.Contains(ip) {
+				log.Printf("IP %s matches preferred network %s", ip.String(), preferredNet)
+				return ip.String()
+			}
+
+			// Prioritize physical interfaces (eth, en, wl) over virtual ones (docker, veth, br, utun)
+			name := strings.ToLower(iface.Name)
+			if strings.HasPrefix(name, "eth") || strings.HasPrefix(name, "en") || strings.HasPrefix(name, "wl") {
+				if preferredSubnet == nil {
+					return ip.String()
+				}
+			}
+
+			if bestIP == "" {
+				bestIP = ip.String()
+			}
 		}
 	}
-	return ""
+	return bestIP
 }
