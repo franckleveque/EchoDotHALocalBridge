@@ -329,6 +329,18 @@ func TestBridgeService_TestDeviceAction(t *testing.T) {
 	mockHA.AssertExpectations(t)
 }
 
+func TestBridgeService_GetRawStates(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+	states := []map[string]interface{}{{"entity_id": "light.test"}}
+	mockHA.On("GetRawStates", mock.Anything).Return(states, nil)
+
+	s := NewBridgeService(mockHA, mockRepo)
+	res, err := s.GetRawStates(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, states, res)
+}
+
 func TestBridgeService_RefreshCooldown(t *testing.T) {
 	mockHA := new(MockHAPort)
 	mockRepo := new(MockConfigRepo)

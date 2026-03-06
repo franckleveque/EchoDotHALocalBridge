@@ -35,6 +35,7 @@ func (s *Server) ListenAndServe(addr string) error {
 	mux.HandleFunc("/admin/config", s.handleConfig)
 	mux.HandleFunc("/admin/ha-entities", s.handleHAEntities)
 	mux.HandleFunc("/admin/test-action", s.handleAdminTestAction)
+	mux.HandleFunc("/admin/debug/ha-states", s.handleDebugHAStates)
 	return http.ListenAndServe(addr, mux)
 }
 
@@ -430,7 +431,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
             allEntities.forEach(e => {
                 const opt = document.createElement('option');
                 opt.value = e.entity_id;
-                opt.textContent = e.friendly_name;
+                opt.textContent = e.friendly_name + ' (' + e.entity_id + ')';
                 sel.appendChild(opt);
             });
 
@@ -704,4 +705,15 @@ func (s *Server) handleHAEntities(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(entities)
+}
+
+func (s *Server) handleDebugHAStates(w http.ResponseWriter, r *http.Request) {
+	states, err := s.bridge.GetRawStates(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).SetIndent("", "  ")
+	json.NewEncoder(w).Encode(states)
 }

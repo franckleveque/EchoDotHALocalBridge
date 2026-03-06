@@ -15,4 +15,5 @@ type BridgePort interface {
 	GetConfig(ctx context.Context) (*model.Config, error)
 	UpdateConfig(ctx context.Context, cfg *model.Config) error
 	GetAllEntities(ctx context.Context) ([]HomeAssistantEntity, error)
+	GetRawStates(ctx context.Context) ([]map[string]interface{}, error)
 }

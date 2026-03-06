@@ -299,3 +299,7 @@ func (s *BridgeService) UpdateConfig(ctx context.Context, cfg *model.Config) err
 func (s *BridgeService) GetAllEntities(ctx context.Context) ([]ports.HomeAssistantEntity, error) {
 	return s.haPort.GetAllEntities(ctx)
 }
+
+func (s *BridgeService) GetRawStates(ctx context.Context) ([]map[string]interface{}, error) {
+	return s.haPort.GetRawStates(ctx)
+}
