@@ -67,14 +67,14 @@ func TestCoverStrategy(t *testing.T) {
 	// Open (via On command)
 	hueState.UpdatedByBri = false
 	service, haParams = s.ToHA(hueState, vd)
-	assert.Equal(t, "open_cover", service)
-	assert.NotContains(t, haParams, "position")
+	assert.Equal(t, "set_cover_position", service)
+	assert.Equal(t, 100, haParams["position"])
 
 	// Closed (via Off command)
 	hueState.On = false
 	service, haParams = s.ToHA(hueState, vd)
-	assert.Equal(t, "close_cover", service)
-	assert.NotContains(t, haParams, "position")
+	assert.Equal(t, "set_cover_position", service)
+	assert.Equal(t, 0, haParams["position"])
 	assert.Equal(t, "off", haParams["extra"])
 }
 
