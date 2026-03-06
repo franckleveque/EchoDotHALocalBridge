@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"hue-bridge-emulator/internal/adapters/input/http"
 	"hue-bridge-emulator/internal/adapters/input/ssdp"
 	"hue-bridge-emulator/internal/adapters/output/homeassistant"
@@ -30,7 +29,7 @@ func main() {
 		log.Fatal("Could not determine local IP. Set LOCAL_IP environment variable (e.g. LOCAL_IP=192.168.1.10) or PREFERRED_NETWORK (e.g. PREFERRED_NETWORK=192.168.1.0/24).")
 	}
 
-	fmt.Printf("Starting Hue Bridge Emulator on %s\n", ip)
+	log.Printf("Starting Hue Bridge Emulator on %s (PID: %d)", ip, os.Getpid())
 
 	// Persistance
 	configRepo := persistence.NewJSONConfigRepository("/data/config.json")

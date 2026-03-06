@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hue-bridge-emulator/internal/domain/model"
 	"hue-bridge-emulator/internal/ports"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -177,7 +178,7 @@ func (c *Client) SetState(ctx context.Context, device *model.Device, params map[
 	url := fmt.Sprintf("%s/api/services/%s/%s", urlBase, domain, service)
 	body, _ := json.Marshal(payload)
 
-	fmt.Printf("HA Service Call: %s | Payload: %s\n", url, string(body))
+	log.Printf("HA Service Call: %s | Payload: %s", url, string(body))
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
 	if err != nil {

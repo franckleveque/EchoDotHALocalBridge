@@ -63,6 +63,7 @@ func (s *BridgeService) TestDeviceAction(ctx context.Context, vd *model.VirtualD
 	}
 	if bri, ok := hueStateUpdate["bri"].(float64); ok {
 		currentHueState.Bri = uint8(bri)
+		currentHueState.UpdatedByBri = true
 		if _, exists := hueStateUpdate["on"]; !exists {
 			currentHueState.On = true
 		}
@@ -210,6 +211,7 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 	}
 	if bri, ok := hueStateUpdate["bri"].(float64); ok {
 		tmpState.Bri = uint8(bri)
+		tmpState.UpdatedByBri = true
 		// Auto turn on if brightness is provided and 'on' is not explicitly false
 		if _, exists := hueStateUpdate["on"]; !exists {
 			tmpState.On = true
@@ -238,6 +240,7 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 	}
 	if bri, ok := hueStateUpdate["bri"].(float64); ok {
 		device.State.Bri = uint8(bri)
+		device.State.UpdatedByBri = true
 		if _, exists := hueStateUpdate["on"]; !exists {
 			device.State.On = true
 		}

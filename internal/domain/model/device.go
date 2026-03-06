@@ -14,6 +14,9 @@ type DeviceState struct {
 	Xy        []float32 `json:"xy"`
 	Ct        uint16    `json:"ct"`
 	Reachable bool      `json:"reachable"`
+
+	// Helper field to distinguish between direct On/Off vs Brightness update
+	UpdatedByBri bool `json:"-"`
 }
 
 type Device struct {
