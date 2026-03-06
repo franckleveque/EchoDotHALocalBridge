@@ -309,15 +309,15 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
                 <button type="button" onclick="loadEntities()" title="Refresh entities" style="padding: 5px 10px; margin-bottom: 10px;">Refresh</button>
             </div>
             <label>Type</label>
-            <select id="dev_type">
+            <select id="dev_type" onchange="toggleAdvanced()">
                 <option value="light">Light</option>
                 <option value="cover">Cover</option>
                 <option value="climate">Climate</option>
                 <option value="custom">Custom</option>
             </select>
 
-            <fieldset>
-                <legend>Actions Configuration</legend>
+            <fieldset id="advanced_config">
+                <legend>Custom Actions Configuration</legend>
                 <label>ON Service</label>
                 <input type="text" id="on_service" placeholder="homeassistant.turn_on">
                 <label>ON Payload (JSON)</label>
@@ -428,6 +428,12 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
             });
         }
 
+        function toggleAdvanced() {
+            const type = document.getElementById('dev_type').value;
+            const advContainer = document.getElementById('advanced_config');
+            advContainer.style.display = (type === 'custom') ? 'block' : 'none';
+        }
+
         function openDeviceModal(index = -1) {
             document.getElementById('edit_index').value = index;
             if (index >= 0) {
@@ -461,6 +467,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
                 document.getElementById('omit_eid').checked = false;
                 document.getElementById('modalTitle').textContent = 'Add Virtual Device';
             }
+            toggleAdvanced();
             document.getElementById('deviceModal').style.display = 'block';
         }
 
