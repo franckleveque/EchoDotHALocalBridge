@@ -94,6 +94,15 @@ sudo apt install -y docker-compose-plugin
 - **Port 80**: The bridge **must** use port 80 for Alexa discovery. Ensure no other service (Nginx, Apache, etc.) is running on your RPi.
 - **Network**: The container uses `network_mode: host` for SSDP. This is mandatory for discovery to work.
 
+### 💻 Host OS Differences (RPi vs. Mac/Windows)
+
+- **Raspberry Pi / Linux**: `network_mode: host` is the native way to run the bridge. It allows direct access via the RPi's IP and supports Alexa SSDP discovery.
+- **Mac / Windows (Docker Desktop)**: Host networking is **not natively supported**. If you are testing locally on Mac/Windows:
+    1.  Edit `docker-compose.yml`.
+    2.  Comment out `network_mode: host`.
+    3.  Uncomment the `ports:` section (mapping 80:80 and 1900:1900/udp).
+    4.  Note that Alexa discovery (SSDP) will likely **not work** due to Docker Desktop's network isolation.
+
 ### 🔍 Troubleshooting
 
 - **ERR_CONNECTION_REFUSED**:
