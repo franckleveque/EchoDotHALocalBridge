@@ -94,18 +94,25 @@ sudo apt install -y docker-compose-plugin
 - **Port 80**: The bridge **must** use port 80 for Alexa discovery. Ensure no other service (Nginx, Apache, etc.) is running on your RPi.
 - **Network**: The container uses `network_mode: host` for SSDP. This is mandatory for discovery to work.
 
-### 💻 Testing on Mac/Windows (Docker Desktop)
+### 💻 Testing on Windows (Docker Desktop)
 
-On Mac and Windows, Docker runs in a virtual machine. This means `network_mode: host` **does not map to localhost** and Alexa discovery (SSDP) will not work.
+On Windows, Docker Desktop runs in a virtual machine (WSL2). This means `network_mode: host` **does not map to localhost** and Alexa discovery (SSDP) will not work.
 
-To test the Web Admin and API on your computer:
+#### 1. Setup for Windows Testing
+To access the Web Admin and API on your computer:
 
-```bash
+```powershell
 # Use the windows-specific compose file
 docker compose -f docker-compose.windows.yml up -d
 ```
 
-You can then access the admin panel at: `http://localhost/admin`.
+You can then access the admin panel at: **`http://localhost/admin`**.
+
+#### 2. Troubleshooting Port 80 on Windows
+If you get `ERR_CONNECTION_REFUSED` or a "Bind for 0.0.0.0:80 failed" error:
+- **Check for IIS**: The "World Wide Web Publishing Service" often takes port 80. Disable it in `services.msc`.
+- **System Process (PID 4)**: Often caused by HTTP.sys. You may need to stop the `http` service: `net stop http` (as admin).
+- **Alternative Port**: If port 80 is strictly blocked, edit `docker-compose.windows.yml` to use `8080:80` and access it at `http://localhost:8080/admin`.
 
 > **Note**: For actual production deployment on a Raspberry Pi, use the standard `docker compose up -d` which uses `network_mode: host`.
 
