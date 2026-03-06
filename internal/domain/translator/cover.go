@@ -1,14 +1,13 @@
 package translator
 
 import (
-	"github.com/amimof/huego"
 	"hue-bridge-emulator/internal/domain/model"
 )
 
 type CoverStrategy struct{}
 
-func (s *CoverStrategy) ToHue(haState map[string]interface{}, vd *model.VirtualDevice) *huego.State {
-	state := &huego.State{}
+func (s *CoverStrategy) ToHue(haState map[string]interface{}, vd *model.VirtualDevice) *model.DeviceState {
+	state := &model.DeviceState{}
 	val, _ := haState["state"].(string)
 	state.On = (val == "open")
 	if attr, ok := haState["attributes"].(map[string]interface{}); ok {
@@ -20,7 +19,7 @@ func (s *CoverStrategy) ToHue(haState map[string]interface{}, vd *model.VirtualD
 	return state
 }
 
-func (s *CoverStrategy) ToHA(hueState *huego.State, vd *model.VirtualDevice) (string, map[string]interface{}) {
+func (s *CoverStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) (string, map[string]interface{}) {
 	service := "set_cover_position"
 	params := make(map[string]interface{})
 	params["position"] = int(float64(hueState.Bri) * 100 / 254)

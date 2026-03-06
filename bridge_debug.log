@@ -1,5 +1,0 @@
-2026/03/06 19:07:13 Found IPv4 address 192.168.0.2 on interface eth0
-2026/03/06 19:07:13 Automatically discovered local IP: 192.168.0.2
-Starting Hue Bridge Emulator on 192.168.0.2
-2026/03/06 19:07:13 Home Assistant not configured. Please use the Web Admin interface.
-2026/03/06 19:07:13 HTTP Server listening on 0.0.0.0:8081 (all interfaces)

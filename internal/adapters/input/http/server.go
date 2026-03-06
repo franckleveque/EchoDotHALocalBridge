@@ -146,11 +146,11 @@ func (s *Server) handleFullState(w http.ResponseWriter, r *http.Request) {
 		strategy := s.translatorFactory.GetTranslator(d.Type)
 		meta := strategy.GetMetadata()
 		lights[d.ID] = &huego.Light{
-			Name:             d.Name,
-			Type:             meta.Type,
-			State:            d.State,
-			ModelID:          meta.ModelID,
-			UniqueID:         d.ID,
+			Name:    d.Name,
+			Type:    meta.Type,
+			State:   s.toHueState(d.State),
+			ModelID: meta.ModelID,
+			UniqueID: d.ID,
 			ManufacturerName: meta.ManufacturerName,
 		}
 	}
@@ -184,11 +184,11 @@ func (s *Server) handleGetLights(w http.ResponseWriter, r *http.Request) {
 		strategy := s.translatorFactory.GetTranslator(d.Type)
 		meta := strategy.GetMetadata()
 		lights[d.ID] = &huego.Light{
-			Name:             d.Name,
-			Type:             meta.Type,
-			State:            d.State,
-			ModelID:          meta.ModelID,
-			UniqueID:         d.ID,
+			Name:    d.Name,
+			Type:    meta.Type,
+			State:   s.toHueState(d.State),
+			ModelID: meta.ModelID,
+			UniqueID: d.ID,
 			ManufacturerName: meta.ManufacturerName,
 		}
 	}
@@ -209,7 +209,7 @@ func (s *Server) handleGetLight(w http.ResponseWriter, r *http.Request, id strin
 	l := &huego.Light{
 		Name:             device.Name,
 		Type:             meta.Type,
-		State:            device.State,
+		State:            s.toHueState(device.State),
 		ModelID:          meta.ModelID,
 		UniqueID:         device.ID,
 		ManufacturerName: meta.ManufacturerName,
@@ -705,6 +705,21 @@ func (s *Server) handleHAEntities(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(entities)
+}
+
+func (s *Server) toHueState(ds *model.DeviceState) *huego.State {
+	if ds == nil {
+		return nil
+	}
+	return &huego.State{
+		On:        ds.On,
+		Bri:       ds.Bri,
+		Hue:       ds.Hue,
+		Sat:       ds.Sat,
+		Xy:        ds.Xy,
+		Ct:        ds.Ct,
+		Reachable: ds.Reachable,
+	}
 }
 
 func (s *Server) handleDebugHAStates(w http.ResponseWriter, r *http.Request) {

@@ -177,6 +177,8 @@ func (c *Client) SetState(ctx context.Context, device *model.Device, params map[
 	url := fmt.Sprintf("%s/api/services/%s/%s", urlBase, domain, service)
 	body, _ := json.Marshal(payload)
 
+	fmt.Printf("HA Service Call: %s | Payload: %s\n", url, string(body))
+
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
 	if err != nil {
 		return err

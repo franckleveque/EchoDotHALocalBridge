@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"sync"
 	"time"
-	"github.com/amimof/huego"
 )
 
 type BridgeService struct {
@@ -53,7 +52,7 @@ func (s *BridgeService) TestDeviceAction(ctx context.Context, vd *model.VirtualD
 	t := s.translatorFactory.GetTranslator(vd.Type)
 
 	// Create a dummy current state
-	currentHueState := &huego.State{
+	currentHueState := &model.DeviceState{
 		On:  false,
 		Bri: 254,
 	}
@@ -64,6 +63,9 @@ func (s *BridgeService) TestDeviceAction(ctx context.Context, vd *model.VirtualD
 	}
 	if bri, ok := hueStateUpdate["bri"].(float64); ok {
 		currentHueState.Bri = uint8(bri)
+		if _, exists := hueStateUpdate["on"]; !exists {
+			currentHueState.On = true
+		}
 	}
 
 	serviceName, params := t.ToHA(currentHueState, vd)
@@ -208,6 +210,10 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 	}
 	if bri, ok := hueStateUpdate["bri"].(float64); ok {
 		tmpState.Bri = uint8(bri)
+		// Auto turn on if brightness is provided and 'on' is not explicitly false
+		if _, exists := hueStateUpdate["on"]; !exists {
+			tmpState.On = true
+		}
 	}
 
 	serviceName, params := t.ToHA(&tmpState, device.VirtualDevice)
@@ -232,6 +238,9 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 	}
 	if bri, ok := hueStateUpdate["bri"].(float64); ok {
 		device.State.Bri = uint8(bri)
+		if _, exists := hueStateUpdate["on"]; !exists {
+			device.State.On = true
+		}
 	}
 
 	deviceCopy := s.copyDevice(device)
