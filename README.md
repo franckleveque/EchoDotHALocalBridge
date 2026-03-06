@@ -93,3 +93,15 @@ sudo apt install -y docker-compose-plugin
 ### ⚠️ Important Notes
 - **Port 80**: The bridge **must** use port 80 for Alexa discovery. Ensure no other service (Nginx, Apache, etc.) is running on your RPi.
 - **Network**: The container uses `network_mode: host` for SSDP. This is mandatory for discovery to work.
+
+### 🔍 Troubleshooting
+
+- **ERR_CONNECTION_REFUSED**:
+    - Ensure no other service is using port 80: `sudo lsof -i :80`
+    - Check the bridge logs: `docker compose logs -f`
+    - Verify your RPi IP address: `hostname -I`
+    - If the bridge is detecting the wrong IP, manually set it in `.env`: `LOCAL_IP=192.168.1.XX`
+- **Alexa cannot find the bridge**:
+    - Ensure your Echo device and RPi are on the same subnet/VLAN.
+    - Host networking is mandatory (`network_mode: host` in `docker-compose.yml`).
+    - Verify SSDP is not blocked by a firewall (UFW): `sudo ufw allow 1900/udp`

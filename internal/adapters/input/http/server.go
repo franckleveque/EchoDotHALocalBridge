@@ -27,6 +27,7 @@ func NewServer(bridge ports.BridgePort, ip string) *Server {
 
 func (s *Server) ListenAndServe(addr string) error {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", s.handleRoot)
 	mux.HandleFunc("/description.xml", s.handleDescription)
 	mux.HandleFunc("/api", s.handleAPI)
 	mux.HandleFunc("/api/", s.handleAPI)
@@ -34,6 +35,14 @@ func (s *Server) ListenAndServe(addr string) error {
 	mux.HandleFunc("/admin/config", s.handleConfig)
 	mux.HandleFunc("/admin/ha-entities", s.handleHAEntities)
 	return http.ListenAndServe(addr, mux)
+}
+
+func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/" {
+		http.Redirect(w, r, "/admin", http.StatusTemporaryRedirect)
+		return
+	}
+	http.NotFound(w, r)
 }
 
 func (s *Server) handleDescription(w http.ResponseWriter, r *http.Request) {
