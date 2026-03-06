@@ -1,0 +1,19 @@
+services:
+  hue-bridge-emulator:
+    build: .
+    container_name: hue-bridge-emulator
+    restart: unless-stopped
+    # ON MAC/WINDOWS: You MUST use explicit port mapping.
+    # network_mode: host is NOT supported for localhost access on Mac/Windows.
+    ports:
+      - "80:80"
+      - "1900:1900/udp"
+    volumes:
+      - ./data:/data
+    environment:
+      - HASS_URL=${HASS_URL}
+      - HASS_TOKEN=${HASS_TOKEN}
+      - CONFIG_PATH=/data/config.json
+      - LOCAL_IP=localhost # For local testing access
+    cap_add:
+      - NET_BIND_SERVICE

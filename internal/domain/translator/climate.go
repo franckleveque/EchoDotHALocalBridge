@@ -1,14 +1,13 @@
 package translator
 
 import (
-	"github.com/amimof/huego"
 	"hue-bridge-emulator/internal/domain/model"
 )
 
 type ClimateStrategy struct{}
 
-func (s *ClimateStrategy) ToHue(haState map[string]interface{}, vd *model.VirtualDevice) *huego.State {
-	state := &huego.State{}
+func (s *ClimateStrategy) ToHue(haState map[string]interface{}, vd *model.VirtualDevice) *model.DeviceState {
+	state := &model.DeviceState{}
 	state.On = true
 	if attr, ok := haState["attributes"].(map[string]interface{}); ok {
 		if temp, ok := attr["temperature"].(float64); ok {
@@ -26,7 +25,7 @@ func (s *ClimateStrategy) ToHue(haState map[string]interface{}, vd *model.Virtua
 	return state
 }
 
-func (s *ClimateStrategy) ToHA(hueState *huego.State, vd *model.VirtualDevice) (string, map[string]interface{}) {
+func (s *ClimateStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) (string, map[string]interface{}) {
 	service := "set_temperature"
 	params := make(map[string]interface{})
 	temp := 7.0 + (float64(hueState.Bri) * (28.0 - 7.0) / 254.0)

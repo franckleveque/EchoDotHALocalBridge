@@ -1,14 +1,14 @@
 package translator
 
 import (
-	"github.com/amimof/huego"
 	"hue-bridge-emulator/internal/domain/model"
+	"strings"
 )
 
 type LightStrategy struct{}
 
-func (s *LightStrategy) ToHue(haState map[string]interface{}, vd *model.VirtualDevice) *huego.State {
-	state := &huego.State{}
+func (s *LightStrategy) ToHue(haState map[string]interface{}, vd *model.VirtualDevice) *model.DeviceState {
+	state := &model.DeviceState{}
 	val, _ := haState["state"].(string)
 	state.On = (val == "on")
 	if attr, ok := haState["attributes"].(map[string]interface{}); ok {
@@ -20,14 +20,24 @@ func (s *LightStrategy) ToHue(haState map[string]interface{}, vd *model.VirtualD
 	return state
 }
 
-func (s *LightStrategy) ToHA(hueState *huego.State, vd *model.VirtualDevice) (string, map[string]interface{}) {
+func (s *LightStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) (string, map[string]interface{}) {
 	service := "turn_on"
+	params := make(map[string]interface{})
+
+	// Map domain to service if possible
+	domain := "light"
+	if vd.EntityID != "" {
+		parts := strings.Split(vd.EntityID, ".")
+		domain = parts[0]
+	}
+
 	if !hueState.On {
 		service = "turn_off"
-	}
-	params := make(map[string]interface{})
-	if hueState.Bri > 0 {
-		params["brightness"] = hueState.Bri
+	} else {
+		// Only include brightness for light domain or if explicitly on
+		if domain == "light" && hueState.Bri > 0 {
+			params["brightness"] = hueState.Bri
+		}
 	}
 
 	if vd.ActionConfig != nil {

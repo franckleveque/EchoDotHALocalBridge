@@ -305,6 +305,53 @@ func TestBridgeService_Config(t *testing.T) {
 	mockHA.AssertExpectations(t)
 }
 
+func TestBridgeService_TestDeviceAction(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+
+	vd := &model.VirtualDevice{
+		Name:     "Test Light",
+		EntityID: "light.test",
+		Type:     model.MappingTypeLight,
+	}
+
+	// Test case 1: Turn ON
+	mockHA.On("SetState", mock.Anything, mock.MatchedBy(func(d *model.Device) bool {
+		return d.Name == "Test Light" && d.ExternalID == "light.test"
+	}), mock.MatchedBy(func(p map[string]interface{}) bool {
+		return p["service"] == "turn_on"
+	})).Return(nil).Once()
+
+	s := NewBridgeService(mockHA, mockRepo)
+	err := s.TestDeviceAction(context.Background(), vd, map[string]interface{}{"on": true})
+	assert.NoError(t, err)
+
+	// Test case 2: Bri update without explicit ON
+	mockHA.On("SetState", mock.Anything, mock.MatchedBy(func(d *model.Device) bool {
+		return d.ExternalID == "light.test"
+	}), mock.MatchedBy(func(p map[string]interface{}) bool {
+		return p["service"] == "turn_on" && p["brightness"] != nil
+	})).Return(nil).Once()
+
+	err = s.TestDeviceAction(context.Background(), vd, map[string]interface{}{"bri": 200.0})
+	assert.NoError(t, err)
+
+	time.Sleep(100 * time.Millisecond)
+	mockHA.AssertExpectations(t)
+}
+
+func TestBridgeService_GetRawStates(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+	states := []map[string]interface{}{{"entity_id": "light.test"}}
+	mockHA.On("GetRawStates", mock.Anything).Return(states, nil)
+
+	s := NewBridgeService(mockHA, mockRepo)
+	res, err := s.GetRawStates(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, states, res)
+}
+
 func TestBridgeService_RefreshCooldown(t *testing.T) {
 	mockHA := new(MockHAPort)
 	mockRepo := new(MockConfigRepo)
@@ -325,4 +372,129 @@ func TestBridgeService_RefreshCooldown(t *testing.T) {
 	assert.NoError(t, err)
 
 	mockHA.AssertExpectations(t)
+}
+
+func TestBridgeService_Start(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+
+	// We'll call Start and then quickly cancel the context.
+	// Since the ticker is 30s, we probably won't see a RefreshDevices call,
+	// but we're testing that the goroutine starts and stops correctly.
+	ctx, cancel := context.WithCancel(context.Background())
+	s := NewBridgeService(mockHA, mockRepo)
+	s.Start(ctx)
+	cancel()
+	time.Sleep(10 * time.Millisecond) // Give time for context cancel propagation
+}
+
+func TestBridgeService_UpdateDeviceState_NotFound(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+
+	s := NewBridgeService(mockHA, mockRepo)
+	err := s.UpdateDeviceState(context.Background(), "99", map[string]interface{}{"on": true})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestBridgeService_UpdateDeviceState_NoOpOn(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+	vd := &model.VirtualDevice{
+		HueID:    "1",
+		Name:     "NoOp On Test",
+		EntityID: "light.noop_on",
+		Type:     model.MappingTypeLight,
+		ActionConfig: &model.ActionConfig{
+			NoOpOn: true,
+		},
+	}
+
+	cfg := &model.Config{VirtualDevices: []*model.VirtualDevice{vd}}
+	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
+	mockHA.On("IsConfigured").Return(true)
+	mockHA.On("GetRawStates", mock.Anything).Return([]map[string]interface{}{
+		{"entity_id": "light.noop_on", "state": "off"},
+	}, nil)
+
+	s := NewBridgeService(mockHA, mockRepo)
+	_, _ = s.GetDevices(context.Background())
+
+	// Update to ON - should be NoOp (no call to SetState)
+	err := s.UpdateDeviceState(context.Background(), "1", map[string]interface{}{"on": true})
+	assert.NoError(t, err)
+
+	time.Sleep(50 * time.Millisecond)
+	mockHA.AssertExpectations(t)
+}
+
+func TestBridgeService_UpdateDeviceState_BriWithoutOn(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+	vd := &model.VirtualDevice{
+		HueID:    "1",
+		Name:     "Bri Auto On Test",
+		EntityID: "light.bri_on",
+		Type:     model.MappingTypeLight,
+	}
+
+	cfg := &model.Config{VirtualDevices: []*model.VirtualDevice{vd}}
+	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
+	mockHA.On("IsConfigured").Return(true)
+	mockHA.On("GetRawStates", mock.Anything).Return([]map[string]interface{}{
+		{"entity_id": "light.bri_on", "state": "off"},
+	}, nil)
+
+	mockHA.On("SetState", mock.Anything, mock.Anything, mock.MatchedBy(func(p map[string]interface{}) bool {
+		return p["service"] == "turn_on"
+	})).Return(nil)
+
+	s := NewBridgeService(mockHA, mockRepo)
+	_, _ = s.GetDevices(context.Background())
+
+	// Update with bri only
+	err := s.UpdateDeviceState(context.Background(), "1", map[string]interface{}{"bri": 127.0})
+	assert.NoError(t, err)
+
+	d, _ := s.GetDevice(context.Background(), "1")
+	assert.True(t, d.State.On)
+	assert.Equal(t, uint8(127), d.State.Bri)
+	assert.True(t, d.State.UpdatedByBri)
+
+	time.Sleep(50 * time.Millisecond)
+	mockHA.AssertExpectations(t)
+}
+
+func TestBridgeService_CopyDevice(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+
+	s := NewBridgeService(mockHA, mockRepo)
+	d := &model.Device{
+		ID:   "1",
+		Name: "Test",
+		State: &model.DeviceState{
+			On: true,
+			Xy: []float32{0.1, 0.2},
+		},
+	}
+
+	// Internal copy call
+	dCopy := s.copyDevice(d)
+
+	assert.NotNil(t, dCopy)
+	assert.NotSame(t, d, dCopy)
+	assert.NotSame(t, d.State, dCopy.State)
+	// Xy is a slice, NotSame expects pointers to the slice header or something if they are not pointers?
+	// Actually assert.NotSame checks if pointers are different.
+	if len(d.State.Xy) > 0 {
+		assert.NotSame(t, &d.State.Xy[0], &dCopy.State.Xy[0])
+	}
+	assert.Equal(t, d.State.Xy, dCopy.State.Xy)
+
+	// Test nil state case
+	d2 := &model.Device{ID: "2"}
+	dCopy2 := s.copyDevice(d2)
+	assert.Nil(t, dCopy2.State)
 }

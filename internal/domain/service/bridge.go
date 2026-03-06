@@ -48,6 +48,50 @@ func (s *BridgeService) Start(ctx context.Context) {
 	}()
 }
 
+func (s *BridgeService) TestDeviceAction(ctx context.Context, vd *model.VirtualDevice, hueStateUpdate map[string]interface{}) error {
+	t := s.translatorFactory.GetTranslator(vd.Type)
+
+	// Create a dummy current state
+	currentHueState := &model.DeviceState{
+		On:  false,
+		Bri: 254,
+	}
+
+	// Apply updates
+	if on, ok := hueStateUpdate["on"].(bool); ok {
+		currentHueState.On = on
+	}
+	if bri, ok := hueStateUpdate["bri"].(float64); ok {
+		currentHueState.Bri = uint8(bri)
+		currentHueState.UpdatedByBri = true
+		if _, exists := hueStateUpdate["on"]; !exists {
+			currentHueState.On = true
+		}
+	}
+
+	serviceName, params := t.ToHA(currentHueState, vd)
+	params["service"] = serviceName
+
+	// Create a dummy device for SetState
+	dummyDevice := &model.Device{
+		ID:            "test",
+		Name:          vd.Name,
+		Type:          vd.Type,
+		ExternalID:    vd.EntityID,
+		State:         currentHueState,
+		VirtualDevice: vd,
+	}
+
+	go func() {
+		err := s.haPort.SetState(context.Background(), dummyDevice, params)
+		if err != nil {
+			fmt.Printf("Error setting HA test state: %v\n", err)
+		}
+	}()
+
+	return nil
+}
+
 func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
@@ -167,6 +211,11 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 	}
 	if bri, ok := hueStateUpdate["bri"].(float64); ok {
 		tmpState.Bri = uint8(bri)
+		tmpState.UpdatedByBri = true
+		// Auto turn on if brightness is provided and 'on' is not explicitly false
+		if _, exists := hueStateUpdate["on"]; !exists {
+			tmpState.On = true
+		}
 	}
 
 	serviceName, params := t.ToHA(&tmpState, device.VirtualDevice)
@@ -191,6 +240,10 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 	}
 	if bri, ok := hueStateUpdate["bri"].(float64); ok {
 		device.State.Bri = uint8(bri)
+		device.State.UpdatedByBri = true
+		if _, exists := hueStateUpdate["on"]; !exists {
+			device.State.On = true
+		}
 	}
 
 	deviceCopy := s.copyDevice(device)
@@ -257,4 +310,8 @@ func (s *BridgeService) UpdateConfig(ctx context.Context, cfg *model.Config) err
 
 func (s *BridgeService) GetAllEntities(ctx context.Context) ([]ports.HomeAssistantEntity, error) {
 	return s.haPort.GetAllEntities(ctx)
+}
+
+func (s *BridgeService) GetRawStates(ctx context.Context) ([]map[string]interface{}, error) {
+	return s.haPort.GetRawStates(ctx)
 }

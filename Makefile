@@ -20,3 +20,6 @@ clean:
 
 docker:
 	docker build -t hue-bridge-emulator:latest .
+
+docker-multiarch:
+	docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t hue-bridge-emulator:latest --push .

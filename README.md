@@ -37,9 +37,94 @@ make test
 ```
 ArchUnit is used to enforce architectural boundaries. Domain coverage is strictly monitored (> 80%).
 
-## 📦 Deployment
+## 📦 Deployment & Installation (Raspberry Pi 3)
 
-Optimized for **Talos Cluster**:
-- `hostNetwork: true` for SSDP.
-- `CAP_NET_BIND_SERVICE` for port 80.
-- `scratch` base image for security.
+The bridge is designed to run on a dedicated **Raspberry Pi 3** to avoid port 80 conflicts (common in Kubernetes/Talos clusters) and to support SSDP discovery via host networking.
+
+### 🛠 Phase 1: OS Installation
+
+1.  **Download [Raspberry Pi Imager](https://www.raspberrypi.com/software/)**.
+2.  **Insert your SD Card** into your computer.
+3.  **Choose OS**: Select `Raspberry Pi OS Lite (64-bit)` for a headless setup.
+4.  **Configuration**:
+    - Click the Cog icon (Advanced options).
+    - Set hostname (e.g., `hue-bridge.local`).
+    - Enable SSH with password or authorized keys.
+    - Configure your Wi-Fi (if not using Ethernet).
+5.  **Write**: Flash the SD card and insert it into your Raspberry Pi 3.
+
+### 🐋 Phase 2: Docker Setup
+
+Once logged into your RPi via SSH:
+
+```bash
+# Update system
+sudo apt update && sudo apt upgrade -y
+
+# Install Docker
+curl -sSL https://get.docker.com | sh
+
+# Add your user to the docker group
+sudo usermod -aG docker $USER
+# (Log out and back in for this to take effect)
+
+# Install Docker Compose
+sudo apt install -y docker-compose-plugin
+```
+
+### 🚀 Phase 3: Bridge Deployment
+
+1.  **Clone the repository**:
+    ```bash
+    git clone https://github.com/your-repo/hue-bridge-emulator.git
+    cd hue-bridge-emulator
+    ```
+2.  **Configure environment**:
+    Create a `.env` file:
+    ```bash
+    HASS_URL=http://<YOUR_HA_IP>:8123
+    HASS_TOKEN=your_long_lived_access_token
+    ```
+3.  **Deploy**:
+    ```bash
+    docker compose up -d
+    ```
+
+### ⚠️ Important Notes
+- **Port 80**: The bridge **must** use port 80 for Alexa discovery. Ensure no other service (Nginx, Apache, etc.) is running on your RPi.
+- **Network**: The container uses `network_mode: host` for SSDP. This is mandatory for discovery to work.
+
+### 💻 Testing on Windows (Docker Desktop)
+
+On Windows, Docker Desktop runs in a virtual machine (WSL2). This means `network_mode: host` **does not map to localhost** and Alexa discovery (SSDP) will not work.
+
+#### 1. Setup for Windows Testing
+To access the Web Admin and API on your computer:
+
+```powershell
+# Use the windows-specific compose file
+docker compose -f docker-compose.windows.yml up -d
+```
+
+You can then access the admin panel at: **`http://localhost/admin`**.
+
+#### 2. Troubleshooting Port 80 on Windows
+If you get `ERR_CONNECTION_REFUSED` or a "Bind for 0.0.0.0:80 failed" error:
+- **Check for IIS**: The "World Wide Web Publishing Service" often takes port 80. Disable it in `services.msc`.
+- **System Process (PID 4)**: Often caused by HTTP.sys. You may need to stop the `http` service: `net stop http` (as admin).
+- **Alternative Port**: If port 80 is strictly blocked, edit `docker-compose.windows.yml` to use `8080:80` and access it at `http://localhost:8080/admin`.
+
+> **Note**: For actual production deployment on a Raspberry Pi, use the standard `docker compose up -d` which uses `network_mode: host`.
+
+### 🔍 Troubleshooting
+
+- **ERR_CONNECTION_REFUSED**:
+    - The server listens on `0.0.0.0:80` (all interfaces). If you get this error, it's likely a firewall (UFW) or port conflict.
+    - Ensure no other service is using port 80: `sudo lsof -i :80`
+    - Check the bridge logs: `docker compose logs -f`
+    - **Crucial**: Verify the "Automatically discovered local IP" in logs. If it says `192.168.65.6` but your network is `192.168.1.x`, the bridge is advertising the wrong address via SSDP.
+    - **Fix**: Manually set your real RPi IP in `.env`: `LOCAL_IP=192.168.1.XX` (then update `docker-compose.yml` environment if necessary) OR use `PREFERRED_NETWORK=192.168.1.0/24`.
+- **Alexa cannot find the bridge**:
+    - Ensure your Echo device and RPi are on the same subnet/VLAN.
+    - Host networking is mandatory (`network_mode: host` in `docker-compose.yml`).
+    - Verify SSDP is not blocked by a firewall (UFW): `sudo ufw allow 1900/udp`

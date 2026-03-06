@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"hue-bridge-emulator/internal/domain/model"
 	"hue-bridge-emulator/internal/ports"
+	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -55,8 +57,14 @@ func (c *Client) GetAllEntities(ctx context.Context) ([]ports.HomeAssistantEntit
 			continue
 		}
 
+		name, _ := s["name"].(string)
 		attributes, _ := s["attributes"].(map[string]interface{})
-		name, _ := attributes["friendly_name"].(string)
+		if name == "" && attributes != nil {
+			name, _ = attributes["friendly_name"].(string)
+			if name == "" {
+				name, _ = attributes["name"].(string)
+			}
+		}
 		if name == "" {
 			name = entityID
 		}
@@ -171,6 +179,8 @@ func (c *Client) SetState(ctx context.Context, device *model.Device, params map[
 	url := fmt.Sprintf("%s/api/services/%s/%s", urlBase, domain, service)
 	body, _ := json.Marshal(payload)
 
+	log.Printf("[PID: %d] HA Service Call: %s | Payload: %s", os.Getpid(), url, string(body))
+
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
 	if err != nil {
 		return err
@@ -213,7 +223,7 @@ func (c *Client) executeEffect(ctx context.Context, effect, urlBase, token strin
 }
 
 func (c *Client) isSupported(entityID string) bool {
-	ignoredDomains := []string{"automation.", "zone.", "person.", "sun.", "weather.", "sensor.", "binary_sensor."}
+	ignoredDomains := []string{"zone.", "sun.", "weather."}
 	for _, domain := range ignoredDomains {
 		if strings.HasPrefix(entityID, domain) {
 			return false

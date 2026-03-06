@@ -2,15 +2,14 @@ package translator
 
 import (
 	"github.com/Knetic/govaluate"
-	"github.com/amimof/huego"
 	"hue-bridge-emulator/internal/domain/model"
 	"strings"
 )
 
 type CustomStrategy struct{}
 
-func (s *CustomStrategy) ToHue(haState map[string]interface{}, vd *model.VirtualDevice) *huego.State {
-	state := &huego.State{}
+func (s *CustomStrategy) ToHue(haState map[string]interface{}, vd *model.VirtualDevice) *model.DeviceState {
+	state := &model.DeviceState{}
 	valStr, _ := haState["state"].(string)
 	state.On = (valStr != "off" && valStr != "closed" && valStr != "unavailable")
 
@@ -38,7 +37,7 @@ func (s *CustomStrategy) ToHue(haState map[string]interface{}, vd *model.Virtual
 	return state
 }
 
-func (s *CustomStrategy) ToHA(hueState *huego.State, vd *model.VirtualDevice) (string, map[string]interface{}) {
+func (s *CustomStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) (string, map[string]interface{}) {
 	service := "turn_on"
 	if !hueState.On {
 		service = "turn_off"

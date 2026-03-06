@@ -27,13 +27,49 @@ func NewServer(bridge ports.BridgePort, ip string) *Server {
 
 func (s *Server) ListenAndServe(addr string) error {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", s.handleRoot)
 	mux.HandleFunc("/description.xml", s.handleDescription)
 	mux.HandleFunc("/api", s.handleAPI)
 	mux.HandleFunc("/api/", s.handleAPI)
 	mux.HandleFunc("/admin", s.handleAdmin)
 	mux.HandleFunc("/admin/config", s.handleConfig)
 	mux.HandleFunc("/admin/ha-entities", s.handleHAEntities)
+	mux.HandleFunc("/admin/test-action", s.handleAdminTestAction)
+	mux.HandleFunc("/admin/debug/ha-states", s.handleDebugHAStates)
 	return http.ListenAndServe(addr, mux)
+}
+
+func (s *Server) handleAdminTestAction(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		VirtualDevice *model.VirtualDevice   `json:"virtual_device"`
+		StateUpdate   map[string]interface{} `json:"state_update"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	err := s.bridge.TestDeviceAction(r.Context(), req.VirtualDevice, req.StateUpdate)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/" {
+		http.Redirect(w, r, "/admin", http.StatusTemporaryRedirect)
+		return
+	}
+	http.NotFound(w, r)
 }
 
 func (s *Server) handleDescription(w http.ResponseWriter, r *http.Request) {
@@ -110,11 +146,11 @@ func (s *Server) handleFullState(w http.ResponseWriter, r *http.Request) {
 		strategy := s.translatorFactory.GetTranslator(d.Type)
 		meta := strategy.GetMetadata()
 		lights[d.ID] = &huego.Light{
-			Name:             d.Name,
-			Type:             meta.Type,
-			State:            d.State,
-			ModelID:          meta.ModelID,
-			UniqueID:         d.ID,
+			Name:    d.Name,
+			Type:    meta.Type,
+			State:   s.toHueState(d.State),
+			ModelID: meta.ModelID,
+			UniqueID: d.ID,
 			ManufacturerName: meta.ManufacturerName,
 		}
 	}
@@ -148,11 +184,11 @@ func (s *Server) handleGetLights(w http.ResponseWriter, r *http.Request) {
 		strategy := s.translatorFactory.GetTranslator(d.Type)
 		meta := strategy.GetMetadata()
 		lights[d.ID] = &huego.Light{
-			Name:             d.Name,
-			Type:             meta.Type,
-			State:            d.State,
-			ModelID:          meta.ModelID,
-			UniqueID:         d.ID,
+			Name:    d.Name,
+			Type:    meta.Type,
+			State:   s.toHueState(d.State),
+			ModelID: meta.ModelID,
+			UniqueID: d.ID,
 			ManufacturerName: meta.ManufacturerName,
 		}
 	}
@@ -173,7 +209,7 @@ func (s *Server) handleGetLight(w http.ResponseWriter, r *http.Request, id strin
 	l := &huego.Light{
 		Name:             device.Name,
 		Type:             meta.Type,
-		State:            device.State,
+		State:            s.toHueState(device.State),
 		ModelID:          meta.ModelID,
 		UniqueID:         device.ID,
 		ManufacturerName: meta.ManufacturerName,
@@ -278,6 +314,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
                     <th>Alexa Name</th>
                     <th>HA Entity ID</th>
                     <th>Type</th>
+                    <th>Test Actions</th>
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -300,15 +337,24 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
                 <button type="button" onclick="loadEntities()" title="Refresh entities" style="padding: 5px 10px; margin-bottom: 10px;">Refresh</button>
             </div>
             <label>Type</label>
-            <select id="dev_type">
+            <select id="dev_type" onchange="toggleAdvanced()">
                 <option value="light">Light</option>
                 <option value="cover">Cover</option>
                 <option value="climate">Climate</option>
                 <option value="custom">Custom</option>
             </select>
 
-            <fieldset>
-                <legend>Actions Configuration</legend>
+            <div id="modal_test_actions" style="margin-bottom: 20px; padding: 10px; border: 1px dashed #007bff; border-radius: 4px;">
+                <label>Test Current Device (Real-time)</label>
+                <div style="display: flex; gap: 10px;">
+                    <button type="button" onclick="testCurrentForm({on: true})">On</button>
+                    <button type="button" onclick="testCurrentForm({on: false})">Off</button>
+                    <button type="button" onclick="testCurrentForm({bri: 127})">Dim 50%</button>
+                </div>
+            </div>
+
+            <fieldset id="advanced_config">
+                <legend>Custom Actions Configuration</legend>
                 <label>ON Service</label>
                 <input type="text" id="on_service" placeholder="homeassistant.turn_on">
                 <label>ON Payload (JSON)</label>
@@ -379,10 +425,9 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 
         function renderEntitySelect(selectedValue = '') {
             const sel = document.getElementById('dev_entity');
-
             sel.innerHTML = '<option value="">-- Select an Entity --</option>';
 
-            // Add existing entities from discovery
+            // Show all entities without filtering
             allEntities.forEach(e => {
                 const opt = document.createElement('option');
                 opt.value = e.entity_id;
@@ -406,17 +451,100 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
             tbody.innerHTML = '';
             config.virtual_devices.forEach((vd, index) => {
                 const tr = document.createElement('tr');
+                const hueId = vd.hue_id || '';
+                const testButtons = hueId ?
+                    '<button onclick="testAction(\''+hueId+'\', {on: true})">On</button> ' +
+                    '<button onclick="testAction(\''+hueId+'\', {on: false})">Off</button> ' +
+                    '<button onclick="testAction(\''+hueId+'\', {bri: 127})">Dim 50%</button>' :
+                    '<span style="color: #666; font-style: italic;">Save config first</span>';
+
                 tr.innerHTML =
-                    '<td>' + (vd.hue_id || 'new') + '</td>' +
+                    '<td>' + (hueId || 'new') + '</td>' +
                     '<td>' + vd.name + '</td>' +
                     '<td>' + vd.entity_id + '</td>' +
                     '<td>' + vd.type + '</td>' +
+                    '<td>' + testButtons + '</td>' +
                     '<td>' +
                         '<button onclick="openDeviceModal(' + index + ')">Edit</button> ' +
                         '<button class="delete" onclick="deleteDevice(' + index + ')">Delete</button>' +
                     '</td>';
                 tbody.appendChild(tr);
             });
+        }
+
+        async function testAction(hueId, state) {
+            try {
+                const res = await fetch('/api/admin/lights/' + hueId + '/state', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(state)
+                });
+                if (res.ok) {
+                    showStatus('Action sent successfully');
+                } else {
+                    showStatus('Error sending action');
+                }
+            } catch (e) {
+                showStatus('Error: ' + e.message);
+            }
+        }
+
+        async function testCurrentForm(stateUpdate) {
+            let on_payload, off_payload;
+            try {
+                on_payload = JSON.parse(document.getElementById('on_payload').value || '{}');
+            } catch (e) {
+                alert('Invalid ON Payload JSON: ' + e.message);
+                return;
+            }
+            try {
+                off_payload = JSON.parse(document.getElementById('off_payload').value || '{}');
+            } catch (e) {
+                alert('Invalid OFF Payload JSON: ' + e.message);
+                return;
+            }
+
+            const vd = {
+                name: document.getElementById('dev_name').value,
+                entity_id: document.getElementById('dev_entity').value,
+                type: document.getElementById('dev_type').value,
+                action_config: {
+                    on_service: document.getElementById('on_service').value,
+                    on_payload: on_payload,
+                    no_op_on: document.getElementById('no_op_on').checked,
+                    off_service: document.getElementById('off_service').value,
+                    off_payload: off_payload,
+                    no_op_off: document.getElementById('no_op_off').checked,
+                    to_hue_formula: document.getElementById('to_hue').value,
+                    to_ha_formula: document.getElementById('to_ha').value,
+                    omit_entity_id: document.getElementById('omit_eid').checked
+                }
+            };
+
+            try {
+                const res = await fetch('/admin/test-action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        virtual_device: vd,
+                        state_update: stateUpdate
+                    })
+                });
+                if (res.ok) {
+                    showStatus('Test action sent successfully');
+                } else {
+                    showStatus('Error sending test action');
+                }
+            } catch (e) {
+                showStatus('Error: ' + e.message);
+            }
+        }
+
+        function toggleAdvanced() {
+            const type = document.getElementById('dev_type').value;
+            const advContainer = document.getElementById('advanced_config');
+            advContainer.style.display = (type === 'custom') ? 'block' : 'none';
+            renderEntitySelect(document.getElementById('dev_entity').value);
         }
 
         function openDeviceModal(index = -1) {
@@ -452,6 +580,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
                 document.getElementById('omit_eid').checked = false;
                 document.getElementById('modalTitle').textContent = 'Add Virtual Device';
             }
+            toggleAdvanced();
             document.getElementById('deviceModal').style.display = 'block';
         }
 
@@ -576,4 +705,30 @@ func (s *Server) handleHAEntities(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(entities)
+}
+
+func (s *Server) toHueState(ds *model.DeviceState) *huego.State {
+	if ds == nil {
+		return nil
+	}
+	return &huego.State{
+		On:        ds.On,
+		Bri:       ds.Bri,
+		Hue:       ds.Hue,
+		Sat:       ds.Sat,
+		Xy:        ds.Xy,
+		Ct:        ds.Ct,
+		Reachable: ds.Reachable,
+	}
+}
+
+func (s *Server) handleDebugHAStates(w http.ResponseWriter, r *http.Request) {
+	states, err := s.bridge.GetRawStates(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).SetIndent("", "  ")
+	json.NewEncoder(w).Encode(states)
 }
