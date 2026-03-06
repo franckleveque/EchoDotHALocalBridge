@@ -31,10 +31,39 @@ func (s *Server) ListenAndServe(addr string) error {
 	mux.HandleFunc("/description.xml", s.handleDescription)
 	mux.HandleFunc("/api", s.handleAPI)
 	mux.HandleFunc("/api/", s.handleAPI)
+	mux.HandleFunc("/api/admin/lights/", s.handleAdminSetLightState)
 	mux.HandleFunc("/admin", s.handleAdmin)
 	mux.HandleFunc("/admin/config", s.handleConfig)
 	mux.HandleFunc("/admin/ha-entities", s.handleHAEntities)
 	return http.ListenAndServe(addr, mux)
+}
+
+func (s *Server) handleAdminSetLightState(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "PUT" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 5 {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	id := parts[4]
+
+	var stateUpdate map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&stateUpdate); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	err := s.bridge.UpdateDeviceState(r.Context(), id, stateUpdate)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -287,6 +316,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
                     <th>Alexa Name</th>
                     <th>HA Entity ID</th>
                     <th>Type</th>
+                    <th>Test Actions</th>
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -302,6 +332,12 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
             <label>Alexa Name</label>
             <input type="text" id="dev_name" placeholder="e.g. Salon Chauffage">
             <label>HA Entity ID</label>
+            <div style="margin-bottom: 5px; display: flex; gap: 10px; align-items: center;">
+                <input type="text" id="entity_search" placeholder="Search entities..." oninput="renderEntitySelect(document.getElementById('dev_entity').value)" style="flex-grow: 1; margin-bottom: 0;">
+                <label style="font-size: 0.8em; white-space: nowrap; font-weight: normal;">
+                    <input type="checkbox" id="show_all_entities" onchange="renderEntitySelect(document.getElementById('dev_entity').value)"> Show all types
+                </label>
+            </div>
             <div style="display: flex; gap: 5px;">
                 <select id="dev_entity" style="flex-grow: 1;">
                     <option value="">-- Select an Entity --</option>
@@ -388,22 +424,51 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 
         function renderEntitySelect(selectedValue = '') {
             const sel = document.getElementById('dev_entity');
+            const search = document.getElementById('entity_search').value.toLowerCase();
+            const type = document.getElementById('dev_type').value;
+            const showAll = document.getElementById('show_all_entities').checked;
 
             sel.innerHTML = '<option value="">-- Select an Entity --</option>';
 
-            // Add existing entities from discovery
-            allEntities.forEach(e => {
+            const domainMap = {
+                'light': ['light', 'switch', 'group', 'input_boolean'],
+                'cover': ['cover'],
+                'climate': ['climate']
+            };
+
+            // Filter logic
+            const filtered = allEntities.filter(e => {
+                const matchesSearch = e.friendly_name.toLowerCase().includes(search) || e.entity_id.toLowerCase().includes(search);
+
+                const domain = e.entity_id.split('.')[0];
+                let matchesType = true;
+                if (!showAll && domainMap[type]) {
+                    matchesType = domainMap[type].includes(domain);
+                }
+
+                return matchesSearch && matchesType;
+            });
+
+            // Add filtered entities from discovery
+            filtered.forEach(e => {
                 const opt = document.createElement('option');
                 opt.value = e.entity_id;
-                opt.textContent = e.friendly_name + ' (' + e.entity_id + ')';
+                const domain = e.entity_id.split('.')[0];
+                opt.textContent = '[' + domain.toUpperCase() + '] ' + e.friendly_name + ' (' + e.entity_id + ')';
                 sel.appendChild(opt);
             });
 
             // If selectedValue is not in discovered entities, add it as a placeholder
-            if (selectedValue && !allEntities.find(e => e.entity_id === selectedValue)) {
+            if (selectedValue && !filtered.find(e => e.entity_id === selectedValue)) {
+                const existing = allEntities.find(e => e.entity_id === selectedValue);
                 const opt = document.createElement('option');
                 opt.value = selectedValue;
-                opt.textContent = '⚠️ ' + selectedValue + ' (unreachable)';
+                if (existing) {
+                    const domain = selectedValue.split('.')[0];
+                    opt.textContent = '[' + domain.toUpperCase() + '] ' + existing.friendly_name + ' (' + selectedValue + ')';
+                } else {
+                    opt.textContent = '⚠️ ' + selectedValue + ' (unreachable)';
+                }
                 sel.appendChild(opt);
             }
 
@@ -415,11 +480,19 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
             tbody.innerHTML = '';
             config.virtual_devices.forEach((vd, index) => {
                 const tr = document.createElement('tr');
+                const hueId = vd.hue_id || '';
+                const testButtons = hueId ?
+                    '<button onclick="testAction(\''+hueId+'\', {on: true})">On</button> ' +
+                    '<button onclick="testAction(\''+hueId+'\', {on: false})">Off</button> ' +
+                    '<button onclick="testAction(\''+hueId+'\', {bri: 127})">Dim 50%</button>' :
+                    '<span style="color: #666; font-style: italic;">Save config first</span>';
+
                 tr.innerHTML =
-                    '<td>' + (vd.hue_id || 'new') + '</td>' +
+                    '<td>' + (hueId || 'new') + '</td>' +
                     '<td>' + vd.name + '</td>' +
                     '<td>' + vd.entity_id + '</td>' +
                     '<td>' + vd.type + '</td>' +
+                    '<td>' + testButtons + '</td>' +
                     '<td>' +
                         '<button onclick="openDeviceModal(' + index + ')">Edit</button> ' +
                         '<button class="delete" onclick="deleteDevice(' + index + ')">Delete</button>' +
@@ -428,10 +501,28 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
             });
         }
 
+        async function testAction(hueId, state) {
+            try {
+                const res = await fetch('/api/admin/lights/' + hueId + '/state', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(state)
+                });
+                if (res.ok) {
+                    showStatus('Action sent successfully');
+                } else {
+                    showStatus('Error sending action');
+                }
+            } catch (e) {
+                showStatus('Error: ' + e.message);
+            }
+        }
+
         function toggleAdvanced() {
             const type = document.getElementById('dev_type').value;
             const advContainer = document.getElementById('advanced_config');
             advContainer.style.display = (type === 'custom') ? 'block' : 'none';
+            renderEntitySelect(document.getElementById('dev_entity').value);
         }
 
         function openDeviceModal(index = -1) {
