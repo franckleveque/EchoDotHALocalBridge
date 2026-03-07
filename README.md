@@ -53,24 +53,13 @@ The bridge is designed to run on a dedicated **Raspberry Pi 3** to avoid port 80
     - Configure your Wi-Fi (if not using Ethernet).
 5.  **Write**: Flash the SD card and insert it into your Raspberry Pi 3.
 
-### 🐋 Phase 2: Docker Setup
+### 🚀 Phase 2: One-Click Installation (Windows PowerShell)
 
-Once logged into your RPi via SSH:
+No Git or Docker setup is required on your RPi beforehand. The installation is performed from your computer using a PowerShell script that builds the image locally and transfers it to the RPi.
 
-```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
-
-# Install Docker
-curl -sSL https://get.docker.com | sh
-
-# Add your user to the docker group
-sudo usermod -aG docker $USER
-# (Log out and back in for this to take effect)
-
-# Install Docker Compose
-sudo apt install -y docker-compose-plugin
-```
+#### Prerequisites (Computer):
+- **Docker Desktop** (with Buildx enabled) installed.
+- **SSH client** (standard in Windows 10/11).
 
 ### 🚀 Phase 3: Bridge Deployment
 
