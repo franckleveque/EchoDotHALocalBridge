@@ -8,6 +8,7 @@ import (
 	"hue-bridge-emulator/internal/domain/translator"
 	"hue-bridge-emulator/internal/ports"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/amimof/huego"
@@ -171,8 +172,13 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprint(w, `[{"success":{"username": "admin"}}]`)
+	s.jsonResponse(w, []map[string]interface{}{
+		{
+			"success": map[string]string{
+				"username": "admin",
+			},
+		},
+	})
 }
 
 func (s *Server) handleFullState(w http.ResponseWriter, r *http.Request) {
@@ -187,11 +193,11 @@ func (s *Server) handleFullState(w http.ResponseWriter, r *http.Request) {
 		strategy := s.translatorFactory.GetTranslator(d.Type)
 		meta := strategy.GetMetadata()
 		lights[d.ID] = &huego.Light{
-			Name:    d.Name,
-			Type:    meta.Type,
-			State:   s.toHueState(d.State),
-			ModelID: meta.ModelID,
-			UniqueID: d.ID,
+			Name:             d.Name,
+			Type:             meta.Type,
+			State:            s.toHueState(d.State),
+			ModelID:          meta.ModelID,
+			UniqueID:         s.formatUniqueID(d.ID),
 			ManufacturerName: meta.ManufacturerName,
 		}
 	}
@@ -209,8 +215,7 @@ func (s *Server) handleFullState(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(fullState)
+	s.jsonResponse(w, fullState)
 }
 
 func (s *Server) handleGetLights(w http.ResponseWriter, r *http.Request) {
@@ -225,17 +230,16 @@ func (s *Server) handleGetLights(w http.ResponseWriter, r *http.Request) {
 		strategy := s.translatorFactory.GetTranslator(d.Type)
 		meta := strategy.GetMetadata()
 		lights[d.ID] = &huego.Light{
-			Name:    d.Name,
-			Type:    meta.Type,
-			State:   s.toHueState(d.State),
-			ModelID: meta.ModelID,
-			UniqueID: d.ID,
+			Name:             d.Name,
+			Type:             meta.Type,
+			State:            s.toHueState(d.State),
+			ModelID:          meta.ModelID,
+			UniqueID:         s.formatUniqueID(d.ID),
 			ManufacturerName: meta.ManufacturerName,
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(lights)
+	s.jsonResponse(w, lights)
 }
 
 func (s *Server) handleGetLight(w http.ResponseWriter, r *http.Request, id string) {
@@ -252,12 +256,11 @@ func (s *Server) handleGetLight(w http.ResponseWriter, r *http.Request, id strin
 		Type:             meta.Type,
 		State:            s.toHueState(device.State),
 		ModelID:          meta.ModelID,
-		UniqueID:         device.ID,
+		UniqueID:         s.formatUniqueID(device.ID),
 		ManufacturerName: meta.ManufacturerName,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(l)
+	s.jsonResponse(w, l)
 }
 
 func (s *Server) handleAdminSetup(w http.ResponseWriter, r *http.Request) {
@@ -352,8 +355,7 @@ func (s *Server) handleSetLightState(w http.ResponseWriter, r *http.Request, id 
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	s.jsonResponse(w, resp)
 }
 
 func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
@@ -807,8 +809,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			VirtualDevices:      cfg.VirtualDevices,
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(displayCfg)
+		s.jsonResponse(w, displayCfg)
 	} else if r.Method == "POST" {
 		var newCfg model.Config
 		if err := json.NewDecoder(r.Body).Decode(&newCfg); err != nil {
@@ -839,8 +840,19 @@ func (s *Server) handleHAEntities(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(entities)
+	s.jsonResponse(w, entities)
+}
+
+func (s *Server) formatUniqueID(id string) string {
+	numericID, _ := strconv.Atoi(id)
+	return fmt.Sprintf("00:17:88:01:00:%02x:%02x:%02x-0b", (numericID>>16)&0xFF, (numericID>>8)&0xFF, numericID&0xFF)
+}
+
+func (s *Server) jsonResponse(w http.ResponseWriter, data interface{}) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	encoder := json.NewEncoder(w)
+	encoder.SetEscapeHTML(false)
+	encoder.Encode(data)
 }
 
 func (s *Server) toHueState(ds *model.DeviceState) *huego.State {
