@@ -11,8 +11,6 @@ services:
     volumes:
       - ./data:/data
     environment:
-      - HASS_URL=${HASS_URL}
-      - HASS_TOKEN=${HASS_TOKEN}
       - CONFIG_PATH=/data/config.json
       - LOCAL_IP=localhost # For local testing access
     cap_add:

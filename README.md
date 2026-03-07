@@ -35,7 +35,7 @@ Access the admin UI at `http://<IP>/admin`.
 ```bash
 make test
 ```
-ArchUnit is used to enforce architectural boundaries. Domain coverage is strictly monitored (> 80%).
+ArchUnit is used to enforce architectural boundaries. Domain coverage is strictly monitored (100%).
 
 ## 📦 Deployment & Installation (Raspberry Pi 3)
 
@@ -61,26 +61,19 @@ No Git or Docker setup is required on your RPi beforehand. The installation is p
 - **Docker Desktop** (with Buildx enabled) installed.
 - **SSH client** (standard in Windows 10/11).
 
-1.  **Download the repository** on your computer.
-2.  **Open PowerShell** (version 5.1 or later).
-3.  **Navigate to the repository folder**:
-    ```powershell
-    cd path\to\hue-bridge-emulator
-    ```
-4.  **Run the installation script**:
-    ```powershell
-    .\scripts\install-rpi.ps1
-    ```
-5.  **Follow the prompts**:
-    - Enter the **IP address** of your RPi.
-    - Enter the **Username** (default is `pi`).
-    - The script will build the Docker image, transfer it via SCP, and install all necessary dependencies on the RPi automatically.
+### 🚀 Phase 3: Bridge Deployment
 
-### ⚙️ Phase 3: Configuration
-
-Once installed, access the admin panel at **`http://<RPi_IP>/admin`**.
-- Go to the **Settings** section.
-- Provide your **Home Assistant URL** and **Long-Lived Access Token**.
+1.  **Clone the repository**:
+    ```bash
+    git clone https://github.com/your-repo/hue-bridge-emulator.git
+    cd hue-bridge-emulator
+    ```
+2.  **Deploy**:
+    ```bash
+    docker compose up -d
+    ```
+3.  **Initial Setup**:
+    Access the setup wizard at `http://<IP>/admin/setup` to create your administrator credentials.
 
 ### ⚠️ Important Notes
 - **Port 80**: The bridge **must** use port 80 for Alexa discovery. Ensure no other service (Nginx, Apache, etc.) is running on your RPi.
@@ -115,7 +108,7 @@ If you get `ERR_CONNECTION_REFUSED` or a "Bind for 0.0.0.0:80 failed" error:
     - Ensure no other service is using port 80: `sudo lsof -i :80`
     - Check the bridge logs: `docker compose logs -f`
     - **Crucial**: Verify the "Automatically discovered local IP" in logs. If it says `192.168.65.6` but your network is `192.168.1.x`, the bridge is advertising the wrong address via SSDP.
-    - **Fix**: Manually set your real RPi IP in `.env`: `LOCAL_IP=192.168.1.XX` (then update `docker-compose.yml` environment if necessary) OR use `PREFERRED_NETWORK=192.168.1.0/24`.
+    - **Fix**: Manually set your real RPi IP in the environment: `LOCAL_IP=192.168.1.XX` (then update `docker-compose.yml` environment if necessary) OR use `PREFERRED_NETWORK=192.168.1.0/24`.
 - **Alexa cannot find the bridge**:
     - Ensure your Echo device and RPi are on the same subnet/VLAN.
     - Host networking is mandatory (`network_mode: host` in `docker-compose.yml`).

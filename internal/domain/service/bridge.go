@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+var RefreshInterval = 30 * time.Second
+
 type BridgeService struct {
 	haPort            ports.HomeAssistantPort
 	configRepo        ports.ConfigRepository
