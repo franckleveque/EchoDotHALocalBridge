@@ -14,5 +14,6 @@ services:
       - ./data:/data
     environment:
       - CONFIG_PATH=/data/config.json
+      - LOG_LEVEL=DEBUG
     cap_add:
       - NET_BIND_SERVICE

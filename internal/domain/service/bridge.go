@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"hue-bridge-emulator/internal/domain/model"
 	"hue-bridge-emulator/internal/domain/translator"
 	"hue-bridge-emulator/internal/ports"
@@ -88,7 +88,7 @@ func (s *BridgeService) TestDeviceAction(ctx context.Context, vd *model.VirtualD
 	go func() {
 		err := s.haPort.SetState(context.Background(), dummyDevice, params)
 		if err != nil {
-			log.Printf("Error setting HA test state: %v", err)
+			slog.Error("Error setting HA test state", "error", err)
 		}
 	}()
 
@@ -107,7 +107,7 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 		return nil
 	}
 
-	log.Printf("Bridge: refreshing devices from HA")
+	slog.Info("Bridge: refreshing devices from HA")
 
 	cfg, err := s.configRepo.Get(ctx)
 	if err != nil {
@@ -116,7 +116,7 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 
 	states, err := s.haPort.GetRawStates(ctx)
 	if err != nil {
-		log.Printf("Bridge: error getting HA states: %v", err)
+		slog.Error("Bridge: error getting HA states", "error", err)
 		return err
 	}
 
@@ -153,7 +153,7 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 	s.devices = newDevices
 	s.lastRefresh = time.Now()
 	s.initialized = true
-	log.Printf("Bridge: refreshed %d devices", len(s.devices))
+	slog.Info("Bridge: refreshed devices", "count", len(s.devices))
 	return nil
 }
 
@@ -259,7 +259,7 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 	go func() {
 		err := s.haPort.SetState(context.Background(), deviceCopy, params)
 		if err != nil {
-			log.Printf("Error setting HA state: %v", err)
+			slog.Error("Error setting HA state", "error", err)
 		}
 	}()
 

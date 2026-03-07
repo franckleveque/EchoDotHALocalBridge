@@ -9,7 +9,7 @@ import (
 	"hue-bridge-emulator/internal/domain/translator"
 	"hue-bridge-emulator/internal/ports"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -896,11 +896,11 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 				bodyBytes, _ := io.ReadAll(r.Body)
 				r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 				bodyStr := string(bodyBytes)
-				log.Printf("HTTP: %s %s from %s body: %s", r.Method, r.URL.Path, r.RemoteAddr, bodyStr)
+				slog.Debug("HTTP request body", "method", r.Method, "path", r.URL.Path, "from", r.RemoteAddr, "body", bodyStr)
 			}
 		}
 
 		next.ServeHTTP(lrw, r)
-		log.Printf("HTTP: %s %s from %s -> %d (%s)", r.Method, r.URL.Path, r.RemoteAddr, lrw.statusCode, time.Since(start))
+		slog.Info("HTTP request", "method", r.Method, "path", r.URL.Path, "from", r.RemoteAddr, "status", lrw.statusCode, "duration", time.Since(start))
 	})
 }

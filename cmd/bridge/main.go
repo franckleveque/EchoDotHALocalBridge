@@ -7,29 +7,44 @@ import (
 	"hue-bridge-emulator/internal/adapters/output/homeassistant"
 	"hue-bridge-emulator/internal/adapters/output/persistence"
 	"hue-bridge-emulator/internal/domain/service"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"strings"
 )
 
 func main() {
+	levelVar := &slog.LevelVar{}
+	switch os.Getenv("LOG_LEVEL") {
+	case "DEBUG":
+		levelVar.Set(slog.LevelDebug)
+	case "WARN":
+		levelVar.Set(slog.LevelWarn)
+	case "ERROR":
+		levelVar.Set(slog.LevelError)
+	default:
+		levelVar.Set(slog.LevelInfo)
+	}
+	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: levelVar})
+	slog.SetDefault(slog.New(handler))
+
 	ip := os.Getenv("LOCAL_IP")
 	if ip != "" {
-		log.Printf("Using LOCAL_IP from environment: %s", ip)
+		slog.Info("Using LOCAL_IP from environment", "ip", ip)
 	} else {
 		preferred := os.Getenv("PREFERRED_NETWORK")
 		ip = getLocalIP(preferred)
 		if ip != "" {
-			log.Printf("Automatically discovered local IP: %s", ip)
+			slog.Info("Automatically discovered local IP", "ip", ip)
 		}
 	}
 
 	if ip == "" {
-		log.Fatal("Could not determine local IP. Set LOCAL_IP environment variable (e.g. LOCAL_IP=192.168.1.10) or PREFERRED_NETWORK (e.g. PREFERRED_NETWORK=192.168.1.0/24).")
+		slog.Error("Could not determine local IP. Set LOCAL_IP environment variable (e.g. LOCAL_IP=192.168.1.10) or PREFERRED_NETWORK (e.g. PREFERRED_NETWORK=192.168.1.0/24).")
+		os.Exit(1)
 	}
 
-	log.Printf("Starting Hue Bridge Emulator on %s (PID: %d)", ip, os.Getpid())
+	slog.Info("Starting Hue Bridge Emulator", "ip", ip, "pid", os.Getpid())
 
 	// Persistance
 	configRepo := persistence.NewJSONConfigRepository("/data/config.json")
@@ -43,13 +58,13 @@ func main() {
 	// Load initial config if exists
 	cfg, err := configRepo.Get(context.Background())
 	if err != nil {
-		log.Printf("Error loading config: %v", err)
+		slog.Error("Error loading config", "error", err)
 	}
 	if cfg.HassURL != "" && cfg.HassToken != "" {
 		haClient.Configure(cfg.HassURL, cfg.HassToken)
-		log.Printf("Home Assistant configured from persisted storage")
+		slog.Info("Home Assistant configured from persisted storage")
 	} else {
-		log.Printf("Home Assistant not configured. Please use the Web Admin interface.")
+		slog.Warn("Home Assistant not configured. Please use the Web Admin interface.")
 	}
 
 	bridgeService := service.NewBridgeService(haClient, configRepo)
@@ -59,7 +74,7 @@ func main() {
 	ssdpServer := ssdp.NewServer(ip)
 	go func() {
 		if err := ssdpServer.Start(); err != nil {
-			log.Printf("SSDP Server error: %v", err)
+			slog.Error("SSDP Server error", "error", err)
 		}
 	}()
 
@@ -76,9 +91,10 @@ func main() {
 		port = "80"
 	}
 	httpServer := http.NewServer(bridgeService, authService, ip)
-	log.Printf("HTTP Server listening on 0.0.0.0:%s (all interfaces)", port)
+	slog.Info("HTTP Server listening", "address", "0.0.0.0:"+port)
 	if err := httpServer.ListenAndServe(":"+port); err != nil {
-		log.Fatal(err)
+		slog.Error("HTTP Server error", "error", err)
+		os.Exit(1)
 	}
 }
 
@@ -88,7 +104,7 @@ func getLocalIP(preferredNet string) string {
 		_, subnet, err := net.ParseCIDR(preferredNet)
 		if err == nil {
 			preferredSubnet = subnet
-			log.Printf("Searching for IP in preferred network: %s", preferredNet)
+			slog.Info("Searching for IP in preferred network", "network", preferredNet)
 		}
 	}
 
@@ -127,11 +143,11 @@ func getLocalIP(preferredNet string) string {
 				continue
 			}
 
-			log.Printf("Found IPv4 address %s on interface %s", ip.String(), iface.Name)
+			slog.Info("Found IPv4 address", "ip", ip.String(), "interface", iface.Name)
 
 			// If we have a preferred network, check if this IP belongs to it
 			if preferredSubnet != nil && preferredSubnet.Contains(ip) {
-				log.Printf("IP %s matches preferred network %s", ip.String(), preferredNet)
+				slog.Info("IP matches preferred network", "ip", ip.String(), "network", preferredNet)
 				return ip.String()
 			}
 
