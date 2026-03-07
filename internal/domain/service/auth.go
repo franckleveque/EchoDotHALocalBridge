@@ -5,7 +5,6 @@ import (
 	"crypto/subtle"
 	"hue-bridge-emulator/internal/domain/model"
 	"hue-bridge-emulator/internal/ports"
-	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -56,5 +55,3 @@ func (s *AuthService) CreateCredentials(ctx context.Context, username, password 
 func (s *AuthService) Exists() bool {
 	return s.authRepo.Exists()
 }
-
-var RefreshInterval = 30 * time.Second

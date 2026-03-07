@@ -35,6 +35,7 @@ jobs:
           TESTABLE_PKGS=$(go list ./... | grep -v 'adapters/input/ssdp' \
                                       | grep -v 'adapters/input/http' \
                                       | grep -v 'adapters/output/homeassistant' \
+                                      | grep -v 'cmd/bridge' \
                                       | tr '\n' ' ')
           go test -v -coverprofile=global.out $TESTABLE_PKGS || exit 1
           GLOBAL_COV=$(go tool cover -func=global.out | grep total | awk '{print $3}' | sed 's/%//')

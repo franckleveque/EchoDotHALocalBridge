@@ -49,7 +49,7 @@ func (s *Server) ListenAndServe(addr string) error {
 func (s *Server) withBasicAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.authService.Exists() {
-			http.Redirect(w, r, "/admin/setup", http.StatusTemporaryRedirect)
+			http.Error(w, "Forbidden - Initial setup required at /admin/setup", http.StatusForbidden)
 			return
 		}
 
@@ -258,7 +258,7 @@ func (s *Server) handleGetLight(w http.ResponseWriter, r *http.Request, id strin
 
 func (s *Server) handleAdminSetup(w http.ResponseWriter, r *http.Request) {
 	if s.authService.Exists() {
-		http.NotFound(w, r)
+		http.Error(w, "Forbidden - Setup already completed", http.StatusForbidden)
 		return
 	}
 
@@ -791,7 +791,12 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Mask token for frontend
-		displayCfg := model.Config{
+		displayCfg := struct {
+			HassURL             string                 `json:"hass_url"`
+			HassToken           string                 `json:"hass_token"`
+			HassTokenConfigured bool                   `json:"hass_token_configured"`
+			VirtualDevices      []*model.VirtualDevice `json:"virtual_devices"`
+		}{
 			HassURL:             cfg.HassURL,
 			HassToken:           "",
 			HassTokenConfigured: cfg.HassToken != "",
