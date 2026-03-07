@@ -1,15 +1,19 @@
 package http
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"hue-bridge-emulator/internal/domain/model"
 	"hue-bridge-emulator/internal/domain/service"
 	"hue-bridge-emulator/internal/domain/translator"
 	"hue-bridge-emulator/internal/ports"
+	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/amimof/huego"
 )
@@ -44,7 +48,7 @@ func (s *Server) ListenAndServe(addr string) error {
 	mux.Handle("/admin/ha-entities", s.withBasicAuth(http.HandlerFunc(s.handleHAEntities)))
 	mux.Handle("/admin/test-action", s.withBasicAuth(http.HandlerFunc(s.handleAdminTestAction)))
 
-	return http.ListenAndServe(addr, mux)
+	return http.ListenAndServe(addr, s.loggingMiddleware(mux))
 }
 
 func (s *Server) withBasicAuth(next http.Handler) http.Handler {
@@ -870,3 +874,33 @@ func (s *Server) toHueState(ds *model.DeviceState) *huego.State {
 	}
 }
 
+type loggingResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (lrw *loggingResponseWriter) WriteHeader(code int) {
+	lrw.statusCode = code
+	lrw.ResponseWriter.WriteHeader(code)
+}
+
+func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		lrw := &loggingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
+		// Check if we should log the body (Alexa related routes)
+		if r.Method == http.MethodPost || r.Method == http.MethodPut {
+			path := r.URL.Path
+			if path == "/description.xml" || path == "/api" || path == "/api/" || strings.HasPrefix(path, "/api/") {
+				bodyBytes, _ := io.ReadAll(r.Body)
+				r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+				bodyStr := string(bodyBytes)
+				slog.Debug("HTTP request body", "method", r.Method, "path", r.URL.Path, "from", r.RemoteAddr, "body", bodyStr)
+			}
+		}
+
+		next.ServeHTTP(lrw, r)
+		slog.Info("HTTP request", "method", r.Method, "path", r.URL.Path, "from", r.RemoteAddr, "status", lrw.statusCode, "duration", time.Since(start))
+	})
+}
