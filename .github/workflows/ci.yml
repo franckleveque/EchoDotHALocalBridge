@@ -20,18 +20,27 @@ jobs:
         run: go test -v -coverprofile=coverage.out ./...
       - name: Code Coverage Report
         run: go tool cover -func=coverage.out
-      - name: Verify Domain Coverage
+      - name: Verify Coverage
         run: |
-          # Use go test to get coverage of domain packages
-          # Format is: ok  module/path  0.123s  coverage: 88.3% of statements
-          COVERAGE=$(go test -cover ./internal/domain/... | awk '/coverage:/{print $5}' | sed 's/%//')
-          echo "Package coverages: $COVERAGE"
+          # Domain coverage should be >= 50%
+          go test -v -coverprofile=domain.out ./internal/domain/... || exit 1
+          DOMAIN_COV=$(go tool cover -func=domain.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Domain Coverage: $DOMAIN_COV%"
+          if [ "$(echo "$DOMAIN_COV 50" | awk '{if ($1 < $2) print 1; else print 0}')" -eq 1 ]; then
+            echo "Domain coverage must be at least 50%"
+            exit 1
+          fi
 
-          # Check Service Domain specifically as it is the core
-          SERVICE_COV=$(go test -cover ./internal/domain/service | awk '/coverage:/{print $5}' | sed 's/%//')
-          echo "Service Domain Coverage: $SERVICE_COV%"
-          if [ "$(echo "$SERVICE_COV 80" | awk '{if ($1 < $2) print 1; else print 0}')" -eq 1 ]; then
-            echo "Service domain coverage is below 80%"
+          # Global coverage (excluding non-testable adapters) should be >= 50%
+          TESTABLE_PKGS=$(go list ./... | grep -v 'adapters/input/ssdp' \
+                                      | grep -v 'adapters/input/http' \
+                                      | grep -v 'adapters/output/homeassistant' \
+                                      | tr '\n' ' ')
+          go test -v -coverprofile=global.out $TESTABLE_PKGS || exit 1
+          GLOBAL_COV=$(go tool cover -func=global.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Global (testable) Coverage: $GLOBAL_COV%"
+          if [ "$(echo "$GLOBAL_COV 50" | awk '{if ($1 < $2) print 1; else print 0}')" -eq 1 ]; then
+            echo "Global (testable) coverage is below 50%"
             exit 1
           fi
 

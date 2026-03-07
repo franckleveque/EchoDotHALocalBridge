@@ -60,6 +60,7 @@ func (r *JSONConfigRepository) Get(ctx context.Context) (*model.Config, error) {
 		return nil, err
 	}
 
+
 	// Migration check: if virtual_devices is empty but there's a file, check for old format
 	if len(cfg.VirtualDevices) == 0 {
 		return r.migrate(data)
@@ -123,5 +124,5 @@ func (r *JSONConfigRepository) Save(ctx context.Context, config *model.Config) e
 		return err
 	}
 
-	return os.WriteFile(r.filepath, data, 0644)
+	return os.WriteFile(r.filepath, data, 0600)
 }
