@@ -123,5 +123,5 @@ func (r *JSONConfigRepository) Save(ctx context.Context, config *model.Config) e
 		return err
 	}
 
-	return os.WriteFile(r.filepath, data, 0644)
+	return os.WriteFile(r.filepath, data, 0600)
 }

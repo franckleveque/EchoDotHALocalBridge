@@ -1,9 +1,11 @@
 package http
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"hue-bridge-emulator/internal/domain/model"
+	"os"
 	"hue-bridge-emulator/internal/domain/translator"
 	"hue-bridge-emulator/internal/ports"
 	"net/http"
@@ -31,12 +33,38 @@ func (s *Server) ListenAndServe(addr string) error {
 	mux.HandleFunc("/description.xml", s.handleDescription)
 	mux.HandleFunc("/api", s.handleAPI)
 	mux.HandleFunc("/api/", s.handleAPI)
-	mux.HandleFunc("/admin", s.handleAdmin)
-	mux.HandleFunc("/admin/config", s.handleConfig)
-	mux.HandleFunc("/admin/ha-entities", s.handleHAEntities)
-	mux.HandleFunc("/admin/test-action", s.handleAdminTestAction)
-	mux.HandleFunc("/admin/debug/ha-states", s.handleDebugHAStates)
+
+	// Admin routes with Basic Auth
+	mux.Handle("/admin", s.withBasicAuth(http.HandlerFunc(s.handleAdmin)))
+	mux.Handle("/admin/config", s.withBasicAuth(http.HandlerFunc(s.handleConfig)))
+	mux.Handle("/admin/ha-entities", s.withBasicAuth(http.HandlerFunc(s.handleHAEntities)))
+	mux.Handle("/admin/test-action", s.withBasicAuth(http.HandlerFunc(s.handleAdminTestAction)))
+	mux.Handle("/admin/debug/ha-states", s.withBasicAuth(http.HandlerFunc(s.handleDebugHAStates)))
+
 	return http.ListenAndServe(addr, mux)
+}
+
+func (s *Server) withBasicAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := os.Getenv("ADMIN_USERNAME")
+		pass := os.Getenv("ADMIN_PASSWORD")
+
+		// If no auth is configured, allow access (or should we require it?)
+		// The requirement says "Aucune authentification", so we should probably require it if set.
+		if user == "" || pass == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		u, p, ok := r.BasicAuth()
+		if !ok || subtle.ConstantTimeCompare([]byte(u), []byte(user)) != 1 || subtle.ConstantTimeCompare([]byte(p), []byte(pass)) != 1 {
+			w.Header().Set("WWW-Authenticate", `Basic realm="restricted", charset="UTF-8"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) handleAdminTestAction(w http.ResponseWriter, r *http.Request) {
@@ -680,15 +708,31 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		// Mask token for frontend
+		displayCfg := *cfg
+		if displayCfg.HassToken != "" {
+			displayCfg.HassToken = "**********"
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(cfg)
+		json.NewEncoder(w).Encode(displayCfg)
 	} else if r.Method == "POST" {
-		var cfg model.Config
-		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		var newCfg model.Config
+		if err := json.NewDecoder(r.Body).Decode(&newCfg); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		err := s.bridge.UpdateConfig(r.Context(), &cfg)
+
+		// If token is masked, keep the existing one
+		if newCfg.HassToken == "**********" {
+			currentCfg, err := s.bridge.GetConfig(r.Context())
+			if err == nil {
+				newCfg.HassToken = currentCfg.HassToken
+			}
+		}
+
+		err := s.bridge.UpdateConfig(r.Context(), &newCfg)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

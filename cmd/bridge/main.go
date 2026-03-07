@@ -49,18 +49,7 @@ func main() {
 		haClient.Configure(cfg.HassURL, cfg.HassToken)
 		log.Printf("Home Assistant configured from persisted storage")
 	} else {
-		// Try env vars for initial config
-		hassURL := os.Getenv("HASS_URL")
-		hassToken := os.Getenv("HASS_TOKEN")
-		if hassURL != "" && hassToken != "" {
-			haClient.Configure(hassURL, hassToken)
-			cfg.HassURL = hassURL
-			cfg.HassToken = hassToken
-			configRepo.Save(context.Background(), cfg)
-			log.Printf("Home Assistant configured from environment variables")
-		} else {
-			log.Printf("Home Assistant not configured. Please use the Web Admin interface.")
-		}
+		log.Printf("Home Assistant not configured. Please use the Web Admin interface.")
 	}
 
 	bridgeService := service.NewBridgeService(haClient, configRepo)
