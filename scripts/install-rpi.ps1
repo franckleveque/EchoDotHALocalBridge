@@ -73,5 +73,5 @@ if (Test-Path "$RepoRoot\hue-bridge-emulator.tar") {
 }
 
 Write-Host "`n[5/5] Installation complete!" -ForegroundColor Green
-Write-Host "Access the Admin UI at http://$($RPi_IP)/admin" -ForegroundColor Cyan
-Write-Host "Note: Home Assistant configuration is handled in the Settings section of the Admin UI." -ForegroundColor Gray
+Write-Host "Access the Admin UI at http://$($RPi_IP)/admin/setup" -ForegroundColor Cyan
+Write-Host "Note: Home Assistant configuration is handled in the Virtual Devices section of the Admin UI after initial setup." -ForegroundColor Gray

@@ -22,12 +22,12 @@ jobs:
         run: go tool cover -func=coverage.out
       - name: Verify Coverage
         run: |
-          # Domain coverage should be >= 50%
+          # Domain coverage must be 100%
           go test -v -coverprofile=domain.out ./internal/domain/... || exit 1
           DOMAIN_COV=$(go tool cover -func=domain.out | grep total | awk '{print $3}' | sed 's/%//')
           echo "Domain Coverage: $DOMAIN_COV%"
-          if [ "$(echo "$DOMAIN_COV 50" | awk '{if ($1 < $2) print 1; else print 0}')" -eq 1 ]; then
-            echo "Domain coverage must be at least 50%"
+          if [ "$DOMAIN_COV" != "100.0" ]; then
+            echo "Domain coverage must be 100%"
             exit 1
           fi
 
