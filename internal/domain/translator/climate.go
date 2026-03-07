@@ -36,12 +36,18 @@ func (s *ClimateStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDev
 			if vd.ActionConfig.OnService != "" {
 				service = vd.ActionConfig.OnService
 			}
+			if vd.ActionConfig.OnEffect != "" {
+				params["effect"] = vd.ActionConfig.OnEffect
+			}
 			for k, v := range vd.ActionConfig.OnPayload {
 				params[k] = v
 			}
 		} else {
 			if vd.ActionConfig.OffService != "" {
 				service = vd.ActionConfig.OffService
+			}
+			if vd.ActionConfig.OffEffect != "" {
+				params["effect"] = vd.ActionConfig.OffEffect
 			}
 			for k, v := range vd.ActionConfig.OffPayload {
 				params[k] = v

@@ -9,7 +9,7 @@ type CoverStrategy struct{}
 func (s *CoverStrategy) ToHue(haState map[string]interface{}, vd *model.VirtualDevice) *model.DeviceState {
 	state := &model.DeviceState{}
 	val, _ := haState["state"].(string)
-	state.On = (val == "open")
+	state.On = (val != "closed")
 	if attr, ok := haState["attributes"].(map[string]interface{}); ok {
 		if pos, ok := attr["current_position"].(float64); ok {
 			state.Bri = uint8(pos * 254 / 100)
@@ -23,27 +23,24 @@ func (s *CoverStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevic
 	service := "set_cover_position"
 	params := make(map[string]interface{})
 
-	// Map Hue On/Off state directly to HA position
-	// - Open (On) = 100
-	// - Closed (Off) = 0
-	if !hueState.On {
-		params["position"] = 0
-	} else if hueState.UpdatedByBri {
-		// If explicitly adjusted via the slider (bri update)
+	// Check if this was a brightness (position) update or just toggle
+	if hueState.UpdatedByBri {
 		params["position"] = int(float64(hueState.Bri) * 100 / 254)
 	} else {
-		// If just turned ON
-		params["position"] = 100
+		if hueState.On {
+			params["position"] = 100
+		} else {
+			params["position"] = 0
+		}
 	}
 
 	if vd.ActionConfig != nil {
 		if hueState.On {
 			if vd.ActionConfig.OnService != "" {
 				service = vd.ActionConfig.OnService
-				// Only clear params if we're not using the default 'set_cover_position'
-				if service != "set_cover_position" {
-					params = make(map[string]interface{})
-				}
+			}
+			if vd.ActionConfig.OnEffect != "" {
+				params["effect"] = vd.ActionConfig.OnEffect
 			}
 			for k, v := range vd.ActionConfig.OnPayload {
 				params[k] = v
@@ -51,9 +48,9 @@ func (s *CoverStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevic
 		} else {
 			if vd.ActionConfig.OffService != "" {
 				service = vd.ActionConfig.OffService
-				if service != "set_cover_position" {
-					params = make(map[string]interface{})
-				}
+			}
+			if vd.ActionConfig.OffEffect != "" {
+				params["effect"] = vd.ActionConfig.OffEffect
 			}
 			for k, v := range vd.ActionConfig.OffPayload {
 				params[k] = v
@@ -67,7 +64,7 @@ func (s *CoverStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevic
 func (s *CoverStrategy) GetMetadata() model.HueMetadata {
 	return model.HueMetadata{
 		Type:             "Window covering device",
-		ModelID:          "LCW001",
+		ModelID:          "LCT001",
 		ManufacturerName: "Philips",
 	}
 }

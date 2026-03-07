@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"hue-bridge-emulator/internal/domain/model"
 	"hue-bridge-emulator/internal/ports"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -26,10 +27,12 @@ func (s *AuthService) Verify(ctx context.Context, username, password string) (bo
 	if err != nil {
 		return false, err
 	}
+	if config == nil {
+		return false, nil
+	}
 
 	userMatch := subtle.ConstantTimeCompare([]byte(username), []byte(config.Username)) == 1
-	err = bcrypt.CompareHashAndPassword([]byte(config.Password), []byte(password))
-	if err != nil {
+	if bcrypt.CompareHashAndPassword([]byte(config.Password), []byte(password)) != nil {
 		return false, nil
 	}
 
@@ -53,3 +56,5 @@ func (s *AuthService) CreateCredentials(ctx context.Context, username, password 
 func (s *AuthService) Exists() bool {
 	return s.authRepo.Exists()
 }
+
+var RefreshInterval = 30 * time.Second

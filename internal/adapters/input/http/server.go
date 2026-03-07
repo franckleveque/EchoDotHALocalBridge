@@ -791,10 +791,11 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Mask token for frontend
-		displayCfg := *cfg
-		if displayCfg.HassToken != "" {
-			displayCfg.HassToken = ""
-			displayCfg.HassTokenConfigured = true
+		displayCfg := model.Config{
+			HassURL:             cfg.HassURL,
+			HassToken:           "",
+			HassTokenConfigured: cfg.HassToken != "",
+			VirtualDevices:      cfg.VirtualDevices,
 		}
 
 		w.Header().Set("Content-Type", "application/json")

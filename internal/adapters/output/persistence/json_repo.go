@@ -60,10 +60,6 @@ func (r *JSONConfigRepository) Get(ctx context.Context) (*model.Config, error) {
 		return nil, err
 	}
 
-	// Set HassTokenConfigured for logic elsewhere
-	if cfg.HassToken != "" {
-		cfg.HassTokenConfigured = true
-	}
 
 	// Migration check: if virtual_devices is empty but there's a file, check for old format
 	if len(cfg.VirtualDevices) == 0 {
@@ -122,11 +118,6 @@ func (r *JSONConfigRepository) migrate(data []byte) (*model.Config, error) {
 func (r *JSONConfigRepository) Save(ctx context.Context, config *model.Config) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
-	// HassTokenConfigured is a virtual field for API, do not persist it to JSON
-	// if we wanted to be strict, but actually it is easier to just save it as is.
-	// However, if we want it to be accurate on next load, we should ensure it's
-	// based on HassToken.
 
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {

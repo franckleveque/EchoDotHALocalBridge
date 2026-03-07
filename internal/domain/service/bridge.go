@@ -34,7 +34,7 @@ func NewBridgeService(haPort ports.HomeAssistantPort, configRepo ports.ConfigRep
 }
 
 func (s *BridgeService) Start(ctx context.Context) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(RefreshInterval)
 	go func() {
 		for {
 			select {
@@ -302,10 +302,13 @@ func (s *BridgeService) UpdateConfig(ctx context.Context, cfg *model.Config) err
 
 	// Force refresh
 	s.refreshMu.Lock()
-	s.lastRefresh = time.Time{}
+	s.lastRefresh = time.Now().Add(-5 * time.Second) // Ensure we can refresh
 	s.refreshMu.Unlock()
 
-	return s.RefreshDevices(ctx)
+	// We don't want to fail the whole update if Home Assistant is currently unreachable
+	_ = s.RefreshDevices(ctx)
+
+	return nil
 }
 
 func (s *BridgeService) GetAllEntities(ctx context.Context) ([]ports.HomeAssistantEntity, error) {
