@@ -103,7 +103,11 @@ func (s *Server) handleAdminTestAction(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/" {
-		http.Redirect(w, r, "/admin", http.StatusTemporaryRedirect)
+		target := "/admin"
+		if !s.authService.Exists() {
+			target = "/admin/setup"
+		}
+		http.Redirect(w, r, target, http.StatusTemporaryRedirect)
 		return
 	}
 	http.NotFound(w, r)

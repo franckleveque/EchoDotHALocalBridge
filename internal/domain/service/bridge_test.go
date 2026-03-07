@@ -278,13 +278,15 @@ func TestBridgeService_Config(t *testing.T) {
 		HassURL:   "http://localhost",
 		HassToken: "token",
 		VirtualDevices: []*model.VirtualDevice{
-			{Name: "New Device", EntityID: "light.new", Type: model.MappingTypeLight},
+			{Name: "New Device", EntityID: "light.new", Type: model.MappingTypeLight, HueID: "5"},
+			{Name: "Another", EntityID: "light.another", Type: model.MappingTypeLight},
 		},
 	}
 
 	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
 	mockRepo.On("Save", mock.Anything, mock.MatchedBy(func(c *model.Config) bool {
-		return c.VirtualDevices[0].HueID == "1"
+		// Verify HueID assignment: 5 was max, so next should be 6
+		return c.VirtualDevices[1].HueID == "6"
 	})).Return(nil)
 	mockHA.On("Configure", "http://localhost", "token").Return()
 	mockHA.On("IsConfigured").Return(true)
@@ -302,6 +304,51 @@ func TestBridgeService_Config(t *testing.T) {
 	assert.NoError(t, err)
 
 	mockRepo.AssertExpectations(t)
+	mockHA.AssertExpectations(t)
+}
+
+func TestBridgeService_UpdateConfig_Errors(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+	cfg := &model.Config{VirtualDevices: []*model.VirtualDevice{
+		{HueID: "invalid"},
+	}}
+	mockRepo.On("Save", mock.Anything, mock.Anything).Return(fmt.Errorf("save error")).Once()
+
+	s := NewBridgeService(mockHA, mockRepo)
+	err := s.UpdateConfig(context.Background(), cfg)
+	assert.Error(t, err)
+}
+
+func TestBridgeService_GetDevices_Error(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+	mockHA.On("IsConfigured").Return(true)
+	mockRepo.On("Get", mock.Anything).Return(&model.Config{}, fmt.Errorf("repo error"))
+
+	s := NewBridgeService(mockHA, mockRepo)
+	_, err := s.GetDevices(context.Background())
+	assert.Error(t, err)
+}
+
+func TestBridgeService_UpdateDeviceState_SetStateError(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+	vd := &model.VirtualDevice{HueID: "1", EntityID: "light.test", Type: model.MappingTypeLight}
+	cfg := &model.Config{VirtualDevices: []*model.VirtualDevice{vd}}
+
+	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
+	mockHA.On("IsConfigured").Return(true)
+	mockHA.On("GetRawStates", mock.Anything).Return([]map[string]interface{}{{"entity_id": "light.test", "state": "on"}}, nil)
+	mockHA.On("SetState", mock.Anything, mock.Anything, mock.Anything).Return(fmt.Errorf("HA error")).Once()
+
+	s := NewBridgeService(mockHA, mockRepo)
+	_, _ = s.GetDevices(context.Background())
+
+	err := s.UpdateDeviceState(context.Background(), "1", map[string]interface{}{"on": false})
+	assert.NoError(t, err)
+
+	time.Sleep(100 * time.Millisecond)
 	mockHA.AssertExpectations(t)
 }
 
@@ -334,6 +381,11 @@ func TestBridgeService_TestDeviceAction(t *testing.T) {
 	})).Return(nil).Once()
 
 	err = s.TestDeviceAction(context.Background(), vd, map[string]interface{}{"bri": 200.0})
+	assert.NoError(t, err)
+
+	// Test case 3: Error in SetState
+	mockHA.On("SetState", mock.Anything, mock.Anything, mock.Anything).Return(fmt.Errorf("HA error")).Once()
+	err = s.TestDeviceAction(context.Background(), vd, map[string]interface{}{"on": false})
 	assert.NoError(t, err)
 
 	time.Sleep(100 * time.Millisecond)
@@ -374,18 +426,56 @@ func TestBridgeService_RefreshCooldown(t *testing.T) {
 	mockHA.AssertExpectations(t)
 }
 
+func TestBridgeService_Refresh_NotConfigured(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+	mockHA.On("IsConfigured").Return(false)
+	s := NewBridgeService(mockHA, mockRepo)
+	err := s.RefreshDevices(context.Background())
+	assert.NoError(t, err)
+}
+
+func TestBridgeService_Refresh_EntityNotFound(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+	cfg := &model.Config{VirtualDevices: []*model.VirtualDevice{{HueID: "1", EntityID: "light.missing", Type: model.MappingTypeLight}}}
+	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
+	mockHA.On("IsConfigured").Return(true)
+	mockHA.On("GetRawStates", mock.Anything).Return([]map[string]interface{}{}, nil)
+	s := NewBridgeService(mockHA, mockRepo)
+	err := s.RefreshDevices(context.Background())
+	assert.NoError(t, err)
+	d, _ := s.GetDevice(context.Background(), "1")
+	assert.NotNil(t, d)
+}
+
 func TestBridgeService_Start(t *testing.T) {
 	mockHA := new(MockHAPort)
 	mockRepo := new(MockConfigRepo)
 
-	// We'll call Start and then quickly cancel the context.
-	// Since the ticker is 30s, we probably won't see a RefreshDevices call,
-	// but we're testing that the goroutine starts and stops correctly.
+	// Reduce interval for test
+	oldInterval := RefreshInterval
+	RefreshInterval = 10 * time.Millisecond
+	defer func() { RefreshInterval = oldInterval }()
+
+	mockHA.On("IsConfigured").Return(false) // Just to make RefreshDevices do nothing quickly
+
 	ctx, cancel := context.WithCancel(context.Background())
 	s := NewBridgeService(mockHA, mockRepo)
 	s.Start(ctx)
+
+	time.Sleep(25 * time.Millisecond) // Should trigger at least one tick
 	cancel()
-	time.Sleep(10 * time.Millisecond) // Give time for context cancel propagation
+	time.Sleep(10 * time.Millisecond)
+	mockHA.AssertExpectations(t)
+}
+
+func TestBridgeService_GetDevice_NotFound(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+	s := NewBridgeService(mockHA, mockRepo)
+	_, err := s.GetDevice(context.Background(), "99")
+	assert.Error(t, err)
 }
 
 func TestBridgeService_UpdateDeviceState_NotFound(t *testing.T) {
