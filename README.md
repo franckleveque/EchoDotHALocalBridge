@@ -1,4 +1,4 @@
-# Hue Bridge Emulator for Home Assistant (SOLID Edition)
+# Hue Bridge Emulator for Home Assistant
 
 This bridge allows emulating a Philips Hue V1 Bridge to expose Home Assistant entities to Alexa (Echo Dot 3).
 
