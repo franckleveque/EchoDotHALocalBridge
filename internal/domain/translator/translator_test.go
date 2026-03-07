@@ -46,6 +46,7 @@ func TestCoverStrategy(t *testing.T) {
 	vd := &model.VirtualDevice{
 		Type: model.MappingTypeCover,
 		ActionConfig: &model.ActionConfig{
+			OnPayload:  map[string]interface{}{"extra": "on"},
 			OffPayload: map[string]interface{}{"extra": "off"},
 		},
 	}
@@ -64,11 +65,18 @@ func TestCoverStrategy(t *testing.T) {
 	assert.Equal(t, "set_cover_position", service)
 	assert.Equal(t, 100, haParams["position"])
 
+	// Intermediate position
+	hueState.Bri = 127
+	service, haParams = s.ToHA(hueState, vd)
+	assert.Equal(t, 50, haParams["position"])
+
 	// Open (via On command)
 	hueState.UpdatedByBri = false
+	hueState.On = true
 	service, haParams = s.ToHA(hueState, vd)
 	assert.Equal(t, "set_cover_position", service)
 	assert.Equal(t, 100, haParams["position"])
+	assert.Equal(t, "on", haParams["extra"])
 
 	// Closed (via Off command)
 	hueState.On = false
@@ -120,7 +128,7 @@ func TestCustomStrategy(t *testing.T) {
 	}
 
 	haState := map[string]interface{}{
-		"state": "idle",
+		"state": "on",
 		"attributes": map[string]interface{}{
 			"brightness": 50.0,
 			"current_position": 10.0,
@@ -131,16 +139,16 @@ func TestCustomStrategy(t *testing.T) {
 	// ToHue should pick brightness first
 	hueState := s.ToHue(haState, vd)
 	assert.Equal(t, uint8(127), hueState.Bri)
+	assert.True(t, hueState.On)
 
-	hueState.Bri = 254
-	hueState.On = true
-	service, haParams := s.ToHA(hueState, vd)
+	testState := &model.DeviceState{On: true, Bri: 254}
+	service, haParams := s.ToHA(testState, vd)
 	assert.Equal(t, "turn_on", service)
 	assert.InDelta(t, 100.0, haParams["value"].(float64), 0.1)
 	assert.Equal(t, "on", haParams["extra"])
 
-	hueState.On = false
-	service, haParams = s.ToHA(hueState, vd)
+	testState.On = false
+	service, haParams = s.ToHA(testState, vd)
 	assert.Equal(t, "turn_off", service)
 	assert.Equal(t, "off", haParams["extra"])
 
@@ -160,6 +168,10 @@ func TestCustomStrategy(t *testing.T) {
 	vd.EntityID = "input_number.test"
 	service, haParams = s.ToHA(hueState, vd)
 	assert.Equal(t, "set_value", service)
+
+	vd.EntityID = "other.test"
+	service, haParams = s.ToHA(hueState, vd)
+	assert.Equal(t, "turn_on", service)
 }
 
 func TestCustomStrategy_Evaluate(t *testing.T) {
@@ -167,6 +179,8 @@ func TestCustomStrategy_Evaluate(t *testing.T) {
 	assert.Equal(t, 10.0, s.evaluate("x * 2", 5))
 	assert.Equal(t, 5.0, s.evaluate("x / 2", 10))
 	assert.Equal(t, 5.0, s.evaluate("invalid", 5))
+	assert.Equal(t, 5.0, s.evaluate("x + 'a'", 5))
+	assert.Equal(t, 5.0, s.evaluate("1 == 1", 5))
 }
 
 func TestMetadata(t *testing.T) {
@@ -189,4 +203,31 @@ func TestFactory(t *testing.T) {
 	assert.IsType(t, &CoverStrategy{}, f.GetTranslator(model.MappingTypeCover))
 	assert.IsType(t, &ClimateStrategy{}, f.GetTranslator(model.MappingTypeClimate))
 	assert.IsType(t, &CustomStrategy{}, f.GetTranslator(model.MappingTypeCustom))
+	assert.IsType(t, &LightStrategy{}, f.GetTranslator("unknown"))
+}
+
+func TestCustomStrategy_ToHue_Fallback(t *testing.T) {
+	s := &CustomStrategy{}
+	vd := &model.VirtualDevice{EntityID: "other.entity"}
+
+	// Test position fallback
+	haState := map[string]interface{}{
+		"attributes": map[string]interface{}{"current_position": 127.0},
+	}
+	hueState := s.ToHue(haState, vd)
+	assert.Equal(t, uint8(127), hueState.Bri)
+
+	// Test temperature fallback
+	haState = map[string]interface{}{
+		"attributes": map[string]interface{}{"temperature": 169.0},
+	}
+	hueState = s.ToHue(haState, vd)
+	assert.Equal(t, uint8(169), hueState.Bri)
+
+	// Test value fallback
+	haState = map[string]interface{}{
+		"attributes": map[string]interface{}{"value": 50.0},
+	}
+	hueState = s.ToHue(haState, vd)
+	assert.Equal(t, uint8(50), hueState.Bri)
 }

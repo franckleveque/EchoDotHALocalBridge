@@ -39,8 +39,9 @@ type VirtualDevice struct {
 }
 
 type Config struct {
-	HassURL        string           `json:"hass_url"`
-	HassToken      string           `json:"hass_token"`
-	LocalIP        string           `json:"local_ip"`
-	VirtualDevices []*VirtualDevice `json:"virtual_devices"` // Ordered slice
+	HassURL              string           `json:"hass_url"`
+	HassToken            string           `json:"hass_token,omitempty"`
+	HassTokenConfigured bool             `json:"hass_token_configured"`
+	LocalIP              string           `json:"local_ip"`
+	VirtualDevices       []*VirtualDevice `json:"virtual_devices"` // Ordered slice
 }

@@ -23,15 +23,24 @@ jobs:
       - name: Verify Domain Coverage
         run: |
           # Use go test to get coverage of domain packages
-          # Format is: ok  module/path  0.123s  coverage: 88.3% of statements
-          COVERAGE=$(go test -cover ./internal/domain/... | awk '/coverage:/{print $5}' | sed 's/%//')
-          echo "Package coverages: $COVERAGE"
+          # Exit with 1 if any test fails
+          go test -v -coverprofile=domain_coverage.out ./internal/domain/... || exit 1
 
-          # Check Service Domain specifically as it is the core
-          SERVICE_COV=$(go test -cover ./internal/domain/service | awk '/coverage:/{print $5}' | sed 's/%//')
-          echo "Service Domain Coverage: $SERVICE_COV%"
-          if [ "$(echo "$SERVICE_COV 80" | awk '{if ($1 < $2) print 1; else print 0}')" -eq 1 ]; then
-            echo "Service domain coverage is below 80%"
+          # Calculate total coverage for internal/domain/...
+          DOMAIN_COV=$(go tool cover -func=domain_coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Total Domain Coverage: $DOMAIN_COV%"
+
+          # Global coverage check
+          GLOBAL_COV=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Global Coverage: $GLOBAL_COV%"
+
+          if [ "$(echo "$GLOBAL_COV 80" | awk '{if ($1 < $2) print 1; else print 0}')" -eq 1 ]; then
+            echo "Global coverage is below 80%"
+            exit 1
+          fi
+
+          if [ "$(echo "$DOMAIN_COV 90" | awk '{if ($1 < $2) print 1; else print 0}')" -eq 1 ]; then
+            echo "Domain coverage is below 90% (target 100%, but 90% enforced for now)"
             exit 1
           fi
 

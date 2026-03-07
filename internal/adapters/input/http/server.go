@@ -1,30 +1,29 @@
 package http
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"hue-bridge-emulator/internal/domain/model"
+	"hue-bridge-emulator/internal/domain/service"
 	"hue-bridge-emulator/internal/domain/translator"
 	"hue-bridge-emulator/internal/ports"
 	"net/http"
 	"strings"
 
 	"github.com/amimof/huego"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type Server struct {
 	bridge            ports.BridgePort
-	auth              ports.AuthPort
+	authService       *service.AuthService
 	translatorFactory *translator.Factory
 	ip                string
 }
 
-func NewServer(bridge ports.BridgePort, auth ports.AuthPort, ip string) *Server {
+func NewServer(bridge ports.BridgePort, authService *service.AuthService, ip string) *Server {
 	return &Server{
 		bridge:            bridge,
-		auth:              auth,
+		authService:       authService,
 		translatorFactory: translator.NewFactory(),
 		ip:                ip,
 	}
@@ -49,7 +48,7 @@ func (s *Server) ListenAndServe(addr string) error {
 
 func (s *Server) withBasicAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.auth.Exists() {
+		if !s.authService.Exists() {
 			http.Redirect(w, r, "/admin/setup", http.StatusTemporaryRedirect)
 			return
 		}
@@ -61,16 +60,13 @@ func (s *Server) withBasicAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		config, err := s.auth.Get(r.Context())
+		ok, err := s.authService.Verify(r.Context(), u, p)
 		if err != nil {
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
 
-		userMatch := subtle.ConstantTimeCompare([]byte(u), []byte(config.Username)) == 1
-		err = bcrypt.CompareHashAndPassword([]byte(config.Password), []byte(p))
-
-		if !userMatch || err != nil {
+		if !ok {
 			w.Header().Set("WWW-Authenticate", `Basic realm="restricted", charset="UTF-8"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
@@ -261,7 +257,7 @@ func (s *Server) handleGetLight(w http.ResponseWriter, r *http.Request, id strin
 }
 
 func (s *Server) handleAdminSetup(w http.ResponseWriter, r *http.Request) {
-	if s.auth.Exists() {
+	if s.authService.Exists() {
 		http.NotFound(w, r)
 		return
 	}
@@ -316,18 +312,7 @@ func (s *Server) handleAdminSetup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		auth := &model.AuthConfig{
-			Username: username,
-			Password: string(hashedPassword),
-		}
-
-		if err := s.auth.Save(r.Context(), auth); err != nil {
+		if err := s.authService.CreateCredentials(r.Context(), username, password); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -522,10 +507,12 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
             if (!config.virtual_devices) config.virtual_devices = [];
 
             document.getElementById('hass_url').value = config.hass_url || '';
-            document.getElementById('hass_token').value = config.hass_token || '';
-            if (config.hass_token === '**********') {
-                document.getElementById('hass_token').placeholder = 'Token already set (leave empty to keep current)';
-                document.getElementById('hass_token').value = '';
+            document.getElementById('hass_token').value = '';
+            const tokenInput = document.getElementById('hass_token');
+            if (config.hass_token_configured) {
+                tokenInput.placeholder = 'Token already set (leave empty to keep current)';
+            } else {
+                tokenInput.placeholder = 'Enter Long-Lived Access Token';
             }
 
             renderDevices();
@@ -806,7 +793,8 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		// Mask token for frontend
 		displayCfg := *cfg
 		if displayCfg.HassToken != "" {
-			displayCfg.HassToken = "**********"
+			displayCfg.HassToken = ""
+			displayCfg.HassTokenConfigured = true
 		}
 
 		w.Header().Set("Content-Type", "application/json")
