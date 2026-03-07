@@ -63,12 +63,18 @@ func main() {
 		}
 	}()
 
+	// Auth
+	authRepo := persistence.NewJSONAuthRepository("/data/auth.json")
+	if os.Getenv("AUTH_PATH") != "" {
+		authRepo = persistence.NewJSONAuthRepository(os.Getenv("AUTH_PATH"))
+	}
+
 	// Start HTTP Server
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "80"
 	}
-	httpServer := http.NewServer(bridgeService, ip)
+	httpServer := http.NewServer(bridgeService, authRepo, ip)
 	log.Printf("HTTP Server listening on 0.0.0.0:%s (all interfaces)", port)
 	if err := httpServer.ListenAndServe(":"+port); err != nil {
 		log.Fatal(err)

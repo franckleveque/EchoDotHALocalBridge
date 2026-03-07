@@ -5,23 +5,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"hue-bridge-emulator/internal/domain/model"
-	"os"
 	"hue-bridge-emulator/internal/domain/translator"
 	"hue-bridge-emulator/internal/ports"
 	"net/http"
 	"strings"
+
 	"github.com/amimof/huego"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type Server struct {
 	bridge            ports.BridgePort
+	auth              ports.AuthPort
 	translatorFactory *translator.Factory
 	ip                string
 }
 
-func NewServer(bridge ports.BridgePort, ip string) *Server {
+func NewServer(bridge ports.BridgePort, auth ports.AuthPort, ip string) *Server {
 	return &Server{
 		bridge:            bridge,
+		auth:              auth,
 		translatorFactory: translator.NewFactory(),
 		ip:                ip,
 	}
@@ -35,29 +38,39 @@ func (s *Server) ListenAndServe(addr string) error {
 	mux.HandleFunc("/api/", s.handleAPI)
 
 	// Admin routes with Basic Auth
+	mux.HandleFunc("/admin/setup", s.handleAdminSetup)
 	mux.Handle("/admin", s.withBasicAuth(http.HandlerFunc(s.handleAdmin)))
 	mux.Handle("/admin/config", s.withBasicAuth(http.HandlerFunc(s.handleConfig)))
 	mux.Handle("/admin/ha-entities", s.withBasicAuth(http.HandlerFunc(s.handleHAEntities)))
 	mux.Handle("/admin/test-action", s.withBasicAuth(http.HandlerFunc(s.handleAdminTestAction)))
-	mux.Handle("/admin/debug/ha-states", s.withBasicAuth(http.HandlerFunc(s.handleDebugHAStates)))
 
 	return http.ListenAndServe(addr, mux)
 }
 
 func (s *Server) withBasicAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user := os.Getenv("ADMIN_USERNAME")
-		pass := os.Getenv("ADMIN_PASSWORD")
-
-		// If no auth is configured, allow access (or should we require it?)
-		// The requirement says "Aucune authentification", so we should probably require it if set.
-		if user == "" || pass == "" {
-			next.ServeHTTP(w, r)
+		if !s.auth.Exists() {
+			http.Redirect(w, r, "/admin/setup", http.StatusTemporaryRedirect)
 			return
 		}
 
 		u, p, ok := r.BasicAuth()
-		if !ok || subtle.ConstantTimeCompare([]byte(u), []byte(user)) != 1 || subtle.ConstantTimeCompare([]byte(p), []byte(pass)) != 1 {
+		if !ok {
+			w.Header().Set("WWW-Authenticate", `Basic realm="restricted", charset="UTF-8"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		config, err := s.auth.Get(r.Context())
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		userMatch := subtle.ConstantTimeCompare([]byte(u), []byte(config.Username)) == 1
+		err = bcrypt.CompareHashAndPassword([]byte(config.Password), []byte(p))
+
+		if !userMatch || err != nil {
 			w.Header().Set("WWW-Authenticate", `Basic realm="restricted", charset="UTF-8"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
@@ -247,6 +260,82 @@ func (s *Server) handleGetLight(w http.ResponseWriter, r *http.Request, id strin
 	json.NewEncoder(w).Encode(l)
 }
 
+func (s *Server) handleAdminSetup(w http.ResponseWriter, r *http.Request) {
+	if s.auth.Exists() {
+		http.NotFound(w, r)
+		return
+	}
+
+	if r.Method == "GET" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Hue Bridge Emulator - Setup</title>
+    <style>
+        body { font-family: sans-serif; max-width: 500px; margin: 100px auto; padding: 20px; line-height: 1.6; background-color: #f4f4f9; }
+        .card { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1 { margin-top: 0; color: #333; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], input[type="password"] { width: 100%; padding: 10px; margin-bottom: 20px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+        button { width: 100%; padding: 12px; background: #007bff; color: white; border: none; cursor: pointer; border-radius: 4px; font-size: 16px; }
+        button:hover { background: #0056b3; }
+        .error { color: #dc3545; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Initial Setup</h1>
+        <p>Define your administrative credentials to secure the bridge.</p>
+        <form method="POST">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" required minlength="3">
+
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required minlength="8">
+
+            <button type="submit">Create Account</button>
+        </form>
+    </div>
+</body>
+</html>
+`)
+	} else if r.Method == "POST" {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		username := r.FormValue("username")
+		password := r.FormValue("password")
+
+		if len(username) < 3 || len(password) < 8 {
+			http.Error(w, "Invalid username or password length", http.StatusBadRequest)
+			return
+		}
+
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		auth := &model.AuthConfig{
+			Username: username,
+			Password: string(hashedPassword),
+		}
+
+		if err := s.auth.Save(r.Context(), auth); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	}
+}
+
 func (s *Server) handleSetLightState(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != "PUT" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -434,6 +523,10 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 
             document.getElementById('hass_url').value = config.hass_url || '';
             document.getElementById('hass_token').value = config.hass_token || '';
+            if (config.hass_token === '**********') {
+                document.getElementById('hass_token').placeholder = 'Token already set (leave empty to keep current)';
+                document.getElementById('hass_token').value = '';
+            }
 
             renderDevices();
             loadEntities();
@@ -668,6 +761,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
         async function saveAll() {
             config.hass_url = document.getElementById('hass_url').value;
             config.hass_token = document.getElementById('hass_token').value;
+            // Note: If hass_token is empty, the backend will preserve the current one
             const res = await fetch('/admin/config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -724,8 +818,8 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// If token is masked, keep the existing one
-		if newCfg.HassToken == "**********" {
+		// If token is empty, keep the existing one
+		if newCfg.HassToken == "" {
 			currentCfg, err := s.bridge.GetConfig(r.Context())
 			if err == nil {
 				newCfg.HassToken = currentCfg.HassToken
@@ -766,13 +860,3 @@ func (s *Server) toHueState(ds *model.DeviceState) *huego.State {
 	}
 }
 
-func (s *Server) handleDebugHAStates(w http.ResponseWriter, r *http.Request) {
-	states, err := s.bridge.GetRawStates(r.Context())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).SetIndent("", "  ")
-	json.NewEncoder(w).Encode(states)
-}
