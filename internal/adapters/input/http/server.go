@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"hue-bridge-emulator/internal/domain/model"
-	"hue-bridge-emulator/internal/domain/service"
-	"hue-bridge-emulator/internal/domain/translator"
 	"hue-bridge-emulator/internal/ports"
 	"io"
 	"log/slog"
@@ -19,18 +17,16 @@ import (
 )
 
 type Server struct {
-	bridge            ports.BridgePort
-	authService       *service.AuthService
-	translatorFactory *translator.Factory
-	ip                string
+	bridge      ports.BridgePort
+	authService ports.AuthService
+	ip          string
 }
 
-func NewServer(bridge ports.BridgePort, authService *service.AuthService, ip string) *Server {
+func NewServer(bridge ports.BridgePort, authService ports.AuthService, ip string) *Server {
 	return &Server{
-		bridge:            bridge,
-		authService:       authService,
-		translatorFactory: translator.NewFactory(),
-		ip:                ip,
+		bridge:      bridge,
+		authService: authService,
+		ip:          ip,
 	}
 }
 
@@ -88,8 +84,8 @@ func (s *Server) handleAdminTestAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		VirtualDevice *model.VirtualDevice   `json:"virtual_device"`
-		StateUpdate   map[string]interface{} `json:"state_update"`
+		VirtualDevice *model.VirtualDevice `json:"virtual_device"`
+		StateUpdate   *model.DeviceState   `json:"state_update"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -194,8 +190,7 @@ func (s *Server) handleFullState(w http.ResponseWriter, r *http.Request) {
 
 	lights := make(map[string]*huego.Light)
 	for _, d := range devices {
-		strategy := s.translatorFactory.GetTranslator(d.Type)
-		meta := strategy.GetMetadata()
+		meta := s.bridge.GetDeviceMetadata(d.Type)
 		lights[d.ID] = &huego.Light{
 			Name:             d.Name,
 			Type:             meta.Type,
@@ -231,8 +226,7 @@ func (s *Server) handleGetLights(w http.ResponseWriter, r *http.Request) {
 
 	lights := make(map[string]*huego.Light)
 	for _, d := range devices {
-		strategy := s.translatorFactory.GetTranslator(d.Type)
-		meta := strategy.GetMetadata()
+		meta := s.bridge.GetDeviceMetadata(d.Type)
 		lights[d.ID] = &huego.Light{
 			Name:             d.Name,
 			Type:             meta.Type,
@@ -253,8 +247,7 @@ func (s *Server) handleGetLight(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 
-	strategy := s.translatorFactory.GetTranslator(device.Type)
-	meta := strategy.GetMetadata()
+	meta := s.bridge.GetDeviceMetadata(device.Type)
 	l := &huego.Light{
 		Name:             device.Name,
 		Type:             meta.Type,
@@ -338,11 +331,21 @@ func (s *Server) handleSetLightState(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 
-	var stateUpdate map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&stateUpdate); err != nil {
+	var rawState map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&rawState); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	stateUpdate := &model.DeviceState{}
+	if on, ok := rawState["on"].(bool); ok {
+		stateUpdate.On = on
+	}
+	if bri, ok := rawState["bri"].(float64); ok {
+		stateUpdate.Bri = uint8(bri)
+		stateUpdate.UpdatedByBri = true
+	}
+	// TODO: handle other fields if needed, but for now these are the main ones
 
 	err := s.bridge.UpdateDeviceState(r.Context(), id, stateUpdate)
 	if err != nil {
@@ -351,7 +354,7 @@ func (s *Server) handleSetLightState(w http.ResponseWriter, r *http.Request, id 
 	}
 
 	resp := []map[string]interface{}{}
-	for k, v := range stateUpdate {
+	for k, v := range rawState {
 		resp = append(resp, map[string]interface{}{
 			"success": map[string]interface{}{
 				fmt.Sprintf("/lights/%s/state/%s", id, k): v,

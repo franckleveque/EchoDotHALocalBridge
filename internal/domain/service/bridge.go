@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"hue-bridge-emulator/internal/domain/model"
-	"hue-bridge-emulator/internal/domain/translator"
 	"hue-bridge-emulator/internal/ports"
 	"sort"
 	"strconv"
@@ -18,7 +17,7 @@ var RefreshInterval = 30 * time.Second
 type BridgeService struct {
 	haPort            ports.HomeAssistantPort
 	configRepo        ports.ConfigRepository
-	translatorFactory *translator.Factory
+	translatorFactory ports.TranslatorFactory
 	devices           map[string]*model.Device
 	mu                sync.RWMutex
 	refreshMu         sync.Mutex
@@ -26,11 +25,11 @@ type BridgeService struct {
 	initialized       bool
 }
 
-func NewBridgeService(haPort ports.HomeAssistantPort, configRepo ports.ConfigRepository) *BridgeService {
+func NewBridgeService(haPort ports.HomeAssistantPort, configRepo ports.ConfigRepository, translatorFactory ports.TranslatorFactory) *BridgeService {
 	s := &BridgeService{
 		haPort:            haPort,
 		configRepo:        configRepo,
-		translatorFactory: translator.NewFactory(),
+		translatorFactory: translatorFactory,
 		devices:           make(map[string]*model.Device),
 	}
 	return s
@@ -51,42 +50,22 @@ func (s *BridgeService) Start(ctx context.Context) {
 	}()
 }
 
-func (s *BridgeService) TestDeviceAction(ctx context.Context, vd *model.VirtualDevice, hueStateUpdate map[string]interface{}) error {
-	t := s.translatorFactory.GetTranslator(vd.Type)
-
-	// Create a dummy current state
-	currentHueState := &model.DeviceState{
-		On:  false,
-		Bri: 254,
-	}
-
-	// Apply updates
-	if on, ok := hueStateUpdate["on"].(bool); ok {
-		currentHueState.On = on
-	}
-	if bri, ok := hueStateUpdate["bri"].(float64); ok {
-		currentHueState.Bri = uint8(bri)
-		currentHueState.UpdatedByBri = true
-		if _, exists := hueStateUpdate["on"]; !exists {
-			currentHueState.On = true
-		}
-	}
-
-	serviceName, params := t.ToHA(currentHueState, vd)
-	params["service"] = serviceName
-
+func (s *BridgeService) TestDeviceAction(ctx context.Context, vd *model.VirtualDevice, state *model.DeviceState) error {
 	// Create a dummy device for SetState
 	dummyDevice := &model.Device{
 		ID:            "test",
 		Name:          vd.Name,
 		Type:          vd.Type,
 		ExternalID:    vd.EntityID,
-		State:         currentHueState,
+		State:         state,
 		VirtualDevice: vd,
 	}
 
+	t := s.translatorFactory.GetTranslator(vd.Type)
+	cmd := t.ToHA(state, vd)
+
 	go func() {
-		err := s.haPort.SetState(context.Background(), dummyDevice, params)
+		err := s.haPort.SetState(context.Background(), dummyDevice, cmd)
 		if err != nil {
 			slog.Error("Error setting HA test state", "error", err)
 		}
@@ -122,7 +101,11 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 
 	// Index HA states by entity_id
 	stateMap := make(map[string]map[string]interface{})
-	for _, state := range states {
+	for _, rawState := range states {
+		state, ok := rawState.(map[string]interface{})
+		if !ok {
+			continue
+		}
 		if eid, ok := state["entity_id"].(string); ok {
 			stateMap[eid] = state
 		}
@@ -201,7 +184,11 @@ func (s *BridgeService) GetDevice(ctx context.Context, id string) (*model.Device
 	return s.copyDevice(d), nil
 }
 
-func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueStateUpdate map[string]interface{}) error {
+func (s *BridgeService) GetDeviceMetadata(deviceType model.MappingType) model.HueMetadata {
+	return s.translatorFactory.GetTranslator(deviceType).GetMetadata()
+}
+
+func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, stateUpdate *model.DeviceState) error {
 	s.mu.Lock()
 	device, ok := s.devices[id]
 	if !ok {
@@ -209,24 +196,15 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 		return fmt.Errorf("device %s not found", id)
 	}
 
-	t := s.translatorFactory.GetTranslator(device.Type)
-
 	// Create a temporary state merged with the current state to handle partial updates
 	tmpState := *device.State
-	if on, ok := hueStateUpdate["on"].(bool); ok {
-		tmpState.On = on
-	}
-	if bri, ok := hueStateUpdate["bri"].(float64); ok {
-		tmpState.Bri = uint8(bri)
+	if stateUpdate.UpdatedByBri {
+		tmpState.Bri = stateUpdate.Bri
 		tmpState.UpdatedByBri = true
-		// Auto turn on if brightness is provided and 'on' is not explicitly false
-		if _, exists := hueStateUpdate["on"]; !exists {
-			tmpState.On = true
-		}
+		tmpState.On = true
+	} else {
+		tmpState.On = stateUpdate.On
 	}
-
-	serviceName, params := t.ToHA(&tmpState, device.VirtualDevice)
-	params["service"] = serviceName
 
 	// Check NoOp before starting goroutine
 	vd := device.VirtualDevice
@@ -242,22 +220,21 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, hueSta
 	}
 
 	// Optimistic update under lock
-	if on, ok := hueStateUpdate["on"].(bool); ok {
-		device.State.On = on
-	}
-	if bri, ok := hueStateUpdate["bri"].(float64); ok {
-		device.State.Bri = uint8(bri)
+	if stateUpdate.UpdatedByBri {
+		device.State.Bri = stateUpdate.Bri
 		device.State.UpdatedByBri = true
-		if _, exists := hueStateUpdate["on"]; !exists {
-			device.State.On = true
-		}
+		device.State.On = true
+	} else {
+		device.State.On = stateUpdate.On
 	}
 
 	deviceCopy := s.copyDevice(device)
+	t := s.translatorFactory.GetTranslator(device.Type)
+	cmd := t.ToHA(&tmpState, device.VirtualDevice)
 	s.mu.Unlock()
 
 	go func() {
-		err := s.haPort.SetState(context.Background(), deviceCopy, params)
+		err := s.haPort.SetState(context.Background(), deviceCopy, cmd)
 		if err != nil {
 			slog.Error("Error setting HA state", "error", err)
 		}
@@ -322,6 +299,3 @@ func (s *BridgeService) GetAllEntities(ctx context.Context) ([]ports.HomeAssista
 	return s.haPort.GetAllEntities(ctx)
 }
 
-func (s *BridgeService) GetRawStates(ctx context.Context) ([]map[string]interface{}, error) {
-	return s.haPort.GetRawStates(ctx)
-}

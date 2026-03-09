@@ -6,10 +6,11 @@ import (
 
 type ClimateStrategy struct{}
 
-func (s *ClimateStrategy) ToHue(haState map[string]interface{}, vd *model.VirtualDevice) *model.DeviceState {
+func (s *ClimateStrategy) ToHue(haState any, vd *model.VirtualDevice) *model.DeviceState {
+	haMap, _ := haState.(map[string]interface{})
 	state := &model.DeviceState{}
 	state.On = true
-	if attr, ok := haState["attributes"].(map[string]interface{}); ok {
+	if attr, ok := haMap["attributes"].(map[string]interface{}); ok {
 		if temp, ok := attr["temperature"].(float64); ok {
 			// Map 7-28°C to 0-254
 			if temp < 7 {
@@ -25,7 +26,7 @@ func (s *ClimateStrategy) ToHue(haState map[string]interface{}, vd *model.Virtua
 	return state
 }
 
-func (s *ClimateStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) (string, map[string]interface{}) {
+func (s *ClimateStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) model.HomeAssistantCommand {
 	service := "set_temperature"
 	params := make(map[string]interface{})
 	temp := 7.0 + (float64(hueState.Bri) * (28.0 - 7.0) / 254.0)
@@ -55,7 +56,10 @@ func (s *ClimateStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDev
 		}
 	}
 
-	return service, params
+	return model.HomeAssistantCommand{
+		Service: service,
+		Data:    params,
+	}
 }
 
 func (s *ClimateStrategy) GetMetadata() model.HueMetadata {

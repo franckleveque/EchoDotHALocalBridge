@@ -8,14 +8,15 @@ import (
 
 type CustomStrategy struct{}
 
-func (s *CustomStrategy) ToHue(haState map[string]interface{}, vd *model.VirtualDevice) *model.DeviceState {
+func (s *CustomStrategy) ToHue(haState any, vd *model.VirtualDevice) *model.DeviceState {
+	haMap, _ := haState.(map[string]interface{})
 	state := &model.DeviceState{}
-	valStr, _ := haState["state"].(string)
+	valStr, _ := haMap["state"].(string)
 	state.On = (valStr != "off" && valStr != "closed" && valStr != "unavailable")
 
 	// Default to brightness/level if available
 	var input float64
-	if attr, ok := haState["attributes"].(map[string]interface{}); ok {
+	if attr, ok := haMap["attributes"].(map[string]interface{}); ok {
 		if v, ok := attr["brightness"].(float64); ok {
 			input = v
 		} else if v, ok := attr["current_position"].(float64); ok {
@@ -37,7 +38,7 @@ func (s *CustomStrategy) ToHue(haState map[string]interface{}, vd *model.Virtual
 	return state
 }
 
-func (s *CustomStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) (string, map[string]interface{}) {
+func (s *CustomStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) model.HomeAssistantCommand {
 	service := "turn_on"
 	if !hueState.On {
 		service = "turn_off"
@@ -96,7 +97,10 @@ func (s *CustomStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevi
 		}
 	}
 
-	return service, params
+	return model.HomeAssistantCommand{
+		Service: service,
+		Data:    params,
+	}
 }
 
 func (s *CustomStrategy) GetMetadata() model.HueMetadata {

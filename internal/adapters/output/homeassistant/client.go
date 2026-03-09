@@ -31,6 +31,7 @@ func NewClient() *Client {
 	}
 }
 
+
 func (c *Client) Configure(url, token string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -51,7 +52,11 @@ func (c *Client) GetAllEntities(ctx context.Context) ([]ports.HomeAssistantEntit
 	}
 
 	var entities []ports.HomeAssistantEntity
-	for _, s := range states {
+	for _, item := range states {
+		s, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
 		entityID, _ := s["entity_id"].(string)
 		if !c.isSupported(entityID) {
 			continue
@@ -78,10 +83,13 @@ func (c *Client) GetAllEntities(ctx context.Context) ([]ports.HomeAssistantEntit
 	return entities, nil
 }
 
-func (c *Client) GetRawStates(ctx context.Context) ([]map[string]interface{}, error) {
+func (c *Client) GetRawStates(ctx context.Context) ([]interface{}, error) {
 	c.mu.RLock()
 	if time.Since(c.cacheTime) < 2*time.Second {
-		res := c.cacheStates
+		res := make([]interface{}, len(c.cacheStates))
+		for i, v := range c.cacheStates {
+			res[i] = v
+		}
 		c.mu.RUnlock()
 		return res, nil
 	}
@@ -129,10 +137,15 @@ func (c *Client) GetRawStates(ctx context.Context) ([]map[string]interface{}, er
 	c.cacheTime = time.Now()
 	c.mu.Unlock()
 
-	return states, nil
+	res := make([]interface{}, len(states))
+	for i, v := range states {
+		res[i] = v
+	}
+	return res, nil
 }
 
-func (c *Client) SetState(ctx context.Context, device *model.Device, params map[string]interface{}) error {
+
+func (c *Client) SetState(ctx context.Context, device *model.Device, cmd model.HomeAssistantCommand) error {
 	c.mu.RLock()
 	urlBase := c.url
 	token := c.token
@@ -142,29 +155,24 @@ func (c *Client) SetState(ctx context.Context, device *model.Device, params map[
 		return fmt.Errorf("Home Assistant not configured")
 	}
 
-	// Safely retrieve service name
-	serviceRaw, ok := params["service"]
-	if !ok {
-		return fmt.Errorf("no service specified for device %s", device.ExternalID)
-	}
-	service, ok := serviceRaw.(string)
-	if !ok || service == "" {
-		return fmt.Errorf("invalid service specified for device %s", device.ExternalID)
-	}
-
 	domain := strings.Split(device.ExternalID, ".")[0]
-	serviceParts := strings.Split(service, ".")
+	serviceParts := strings.Split(cmd.Service, ".")
+	service := cmd.Service
 	if len(serviceParts) == 2 {
 		domain = serviceParts[0]
 		service = serviceParts[1]
 	}
 
 	payload := make(map[string]interface{})
-	for k, v := range params {
-		if k == "effect" || k == "service" || k == "__is_on" {
-			continue
+	if cmd.Data != nil {
+		if dm, ok := cmd.Data.(map[string]interface{}); ok {
+			for k, v := range dm {
+				if k == "effect" {
+					continue
+				}
+				payload[k] = v
+			}
 		}
-		payload[k] = v
 	}
 
 	// Handle OmitEntityID
@@ -199,8 +207,12 @@ func (c *Client) SetState(ctx context.Context, device *model.Device, params map[
 	}
 
 	// Handle custom effects if provided
-	if effect, ok := params["effect"].(string); ok && effect != "" {
-		c.executeEffect(ctx, effect, urlBase, token)
+	if cmd.Data != nil {
+		if dm, ok := cmd.Data.(map[string]interface{}); ok {
+			if effect, ok := dm["effect"].(string); ok && effect != "" {
+				c.executeEffect(ctx, effect, urlBase, token)
+			}
+		}
 	}
 
 	return nil

@@ -7,6 +7,7 @@ import (
 	"hue-bridge-emulator/internal/adapters/output/homeassistant"
 	"hue-bridge-emulator/internal/adapters/output/persistence"
 	"hue-bridge-emulator/internal/domain/service"
+	"hue-bridge-emulator/internal/domain/translator"
 	"log/slog"
 	"net"
 	"os"
@@ -54,6 +55,7 @@ func main() {
 
 	// HA Client
 	haClient := homeassistant.NewClient()
+	translatorFactory := translator.NewFactory()
 
 	// Load initial config if exists
 	cfg, err := configRepo.Get(context.Background())
@@ -67,7 +69,7 @@ func main() {
 		slog.Warn("Home Assistant not configured. Please use the Web Admin interface.")
 	}
 
-	bridgeService := service.NewBridgeService(haClient, configRepo)
+	bridgeService := service.NewBridgeService(haClient, configRepo, translatorFactory)
 	bridgeService.Start(context.Background())
 
 	// Start SSDP Server

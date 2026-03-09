@@ -27,3 +27,8 @@ type Device struct {
 	State         *DeviceState
 	VirtualDevice *VirtualDevice
 }
+
+type HomeAssistantCommand struct {
+	Service string
+	Data    any
+}

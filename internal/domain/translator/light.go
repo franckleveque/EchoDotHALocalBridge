@@ -7,11 +7,12 @@ import (
 
 type LightStrategy struct{}
 
-func (s *LightStrategy) ToHue(haState map[string]interface{}, vd *model.VirtualDevice) *model.DeviceState {
+func (s *LightStrategy) ToHue(haState any, vd *model.VirtualDevice) *model.DeviceState {
+	haMap, _ := haState.(map[string]interface{})
 	state := &model.DeviceState{}
-	val, _ := haState["state"].(string)
+	val, _ := haMap["state"].(string)
 	state.On = (val == "on")
-	if attr, ok := haState["attributes"].(map[string]interface{}); ok {
+	if attr, ok := haMap["attributes"].(map[string]interface{}); ok {
 		if bri, ok := attr["brightness"].(float64); ok {
 			state.Bri = uint8(bri)
 		}
@@ -20,7 +21,7 @@ func (s *LightStrategy) ToHue(haState map[string]interface{}, vd *model.VirtualD
 	return state
 }
 
-func (s *LightStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) (string, map[string]interface{}) {
+func (s *LightStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) model.HomeAssistantCommand {
 	service := "turn_on"
 	params := make(map[string]interface{})
 
@@ -64,7 +65,10 @@ func (s *LightStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevic
 		}
 	}
 
-	return service, params
+	return model.HomeAssistantCommand{
+		Service: service,
+		Data:    params,
+	}
 }
 
 func (s *LightStrategy) GetMetadata() model.HueMetadata {
