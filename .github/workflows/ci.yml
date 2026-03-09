@@ -32,15 +32,15 @@ jobs:
             exit 1
           fi
 
-          # Global coverage (including all but SSDP and main entry point) should be >= 60% with E2E tests
-          TESTABLE_PKGS=$(go list ./... | grep -v 'adapters/input/ssdp' \
+          # Global coverage (including all but SSDP and main entry point) should be >= 70% with E2E tests
+          TESTABLE_PKGS=$(go list -tags e2e ./... | grep -v 'adapters/input/ssdp' \
                                       | grep -v 'cmd/bridge' \
                                       | tr '\n' ' ')
           go test -v -tags e2e -coverprofile=global.out -coverpkg=./... $TESTABLE_PKGS || exit 1
           GLOBAL_COV=$(go tool cover -func=global.out | grep total | awk '{print $3}' | sed 's/%//')
           echo "Global Coverage (with E2E): $GLOBAL_COV%"
-          if [ "$(echo "$GLOBAL_COV 60" | awk '{if ($1 < $2) print 1; else print 0}')" -eq 1 ]; then
-            echo "Global coverage (with E2E) is below 60%"
+          if [ "$(echo "$GLOBAL_COV 70" | awk '{if ($1 < $2) print 1; else print 0}')" -eq 1 ]; then
+            echo "Global coverage (with E2E) is below 70%"
             exit 1
           fi
 
