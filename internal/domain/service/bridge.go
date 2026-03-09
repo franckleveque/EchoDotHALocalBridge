@@ -75,7 +75,7 @@ func (s *BridgeService) TestDeviceAction(ctx context.Context, vd *model.VirtualD
 	case s.workerSem <- struct{}{}:
 		go func() {
 			defer func() { <-s.workerSem }()
-			err := s.haPort.SetState(ctx, dummyDevice, cmd)
+			err := s.haPort.SetState(context.Background(), dummyDevice, cmd)
 			if err != nil {
 				slog.Error("Error setting HA test state", "error", err)
 			}
@@ -121,9 +121,11 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 
 		newDevices := make(map[string]*model.Device)
 
+		fmt.Printf("Bridge: processing %d virtual devices, HA state map size: %d\n", len(cfg.VirtualDevices), len(stateMap))
 		for _, vd := range cfg.VirtualDevices {
 			state, exists := stateMap[vd.EntityID]
 			if !exists {
+				fmt.Printf("Bridge: entity %s not found in HA states\n", vd.EntityID)
 				state = model.HAEntityState{EntityID: vd.EntityID, State: "unavailable"}
 			}
 
@@ -251,7 +253,7 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, stateU
 	case s.workerSem <- struct{}{}:
 		go func() {
 			defer func() { <-s.workerSem }()
-			err := s.haPort.SetState(ctx, deviceCopy, cmd)
+			err := s.haPort.SetState(context.Background(), deviceCopy, cmd)
 			if err != nil {
 				slog.Error("Error setting HA state", "error", err)
 			}

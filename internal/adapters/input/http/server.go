@@ -36,7 +36,7 @@ func NewServer(hue ports.HueEmulationPort, admin ports.AdminPort, authService po
 	}
 }
 
-func (s *Server) ListenAndServe(addr string) error {
+func (s *Server) Mux() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleRoot)
 	mux.HandleFunc("/description.xml", s.handleDescription)
@@ -50,7 +50,15 @@ func (s *Server) ListenAndServe(addr string) error {
 	mux.Handle("/admin/ha-entities", s.withBasicAuth(http.HandlerFunc(s.handleHAEntities)))
 	mux.Handle("/admin/test-action", s.withBasicAuth(http.HandlerFunc(s.handleAdminTestAction)))
 
-	return http.ListenAndServe(addr, s.loggingMiddleware(mux))
+	return mux
+}
+
+func (s *Server) Handler() http.Handler {
+	return s.loggingMiddleware(s.Mux())
+}
+
+func (s *Server) ListenAndServe(addr string) error {
+	return http.ListenAndServe(addr, s.Handler())
 }
 
 func (s *Server) withBasicAuth(next http.Handler) http.Handler {
