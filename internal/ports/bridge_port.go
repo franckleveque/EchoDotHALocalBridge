@@ -11,7 +11,7 @@ type HomeAssistantEntity struct {
 }
 
 type Translator interface {
-	ToHue(haState any, vd *model.VirtualDevice) *model.DeviceState
+	ToHue(haState model.HAEntityState, vd *model.VirtualDevice) *model.DeviceState
 	ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) model.HomeAssistantCommand
 	GetMetadata() model.HueMetadata
 }
@@ -43,9 +43,12 @@ type BridgePort interface {
 }
 
 type HomeAssistantPort interface {
-	GetRawStates(ctx context.Context) ([]any, error)
+	GetRawStates(ctx context.Context) ([]model.HAEntityState, error)
 	GetAllEntities(ctx context.Context) ([]HomeAssistantEntity, error)
 	SetState(ctx context.Context, device *model.Device, cmd model.HomeAssistantCommand) error
+}
+
+// Reconfigurable defines an interface for ports that can be reconfigured at runtime
+type Reconfigurable interface {
 	Configure(url, token string)
-	IsConfigured() bool
 }

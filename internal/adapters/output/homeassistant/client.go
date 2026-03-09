@@ -52,30 +52,25 @@ func (c *Client) GetAllEntities(ctx context.Context) ([]ports.HomeAssistantEntit
 	}
 
 	var entities []ports.HomeAssistantEntity
-	for _, item := range states {
-		s, ok := item.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		entityID, _ := s["entity_id"].(string)
-		if !c.isSupported(entityID) {
+	for _, s := range states {
+		if !c.isSupported(s.EntityID) {
 			continue
 		}
 
-		name, _ := s["name"].(string)
-		attributes, _ := s["attributes"].(map[string]interface{})
-		if name == "" && attributes != nil {
-			name, _ = attributes["friendly_name"].(string)
-			if name == "" {
-				name, _ = attributes["name"].(string)
+		name := ""
+		if s.Attributes != nil {
+			if n, ok := s.Attributes["friendly_name"].(string); ok {
+				name = n
+			} else if n, ok := s.Attributes["name"].(string); ok {
+				name = n
 			}
 		}
 		if name == "" {
-			name = entityID
+			name = s.EntityID
 		}
 
 		entities = append(entities, ports.HomeAssistantEntity{
-			EntityID:     entityID,
+			EntityID:     s.EntityID,
 			FriendlyName: name,
 		})
 	}
@@ -83,12 +78,12 @@ func (c *Client) GetAllEntities(ctx context.Context) ([]ports.HomeAssistantEntit
 	return entities, nil
 }
 
-func (c *Client) GetRawStates(ctx context.Context) ([]any, error) {
+func (c *Client) GetRawStates(ctx context.Context) ([]model.HAEntityState, error) {
 	c.mu.RLock()
 	if time.Since(c.cacheTime) < 2*time.Second {
-		res := make([]any, len(c.cacheStates))
+		res := make([]model.HAEntityState, len(c.cacheStates))
 		for i, v := range c.cacheStates {
-			res[i] = v
+			res[i] = c.toMapToStruct(v)
 		}
 		c.mu.RUnlock()
 		return res, nil
@@ -137,13 +132,25 @@ func (c *Client) GetRawStates(ctx context.Context) ([]any, error) {
 	c.cacheTime = time.Now()
 	c.mu.Unlock()
 
-	res := make([]any, len(states))
+	res := make([]model.HAEntityState, len(states))
 	for i, v := range states {
-		res[i] = v
+		res[i] = c.toMapToStruct(v)
 	}
 	return res, nil
 }
 
+func (c *Client) toMapToStruct(m map[string]interface{}) model.HAEntityState {
+	s := model.HAEntityState{}
+	s.EntityID, _ = m["entity_id"].(string)
+	s.State, _ = m["state"].(string)
+	if attr, ok := m["attributes"].(map[string]interface{}); ok {
+		s.Attributes = make(model.HAFields)
+		for k, v := range attr {
+			s.Attributes[k] = v
+		}
+	}
+	return s
+}
 
 func (c *Client) SetState(ctx context.Context, device *model.Device, cmd model.HomeAssistantCommand) error {
 	c.mu.RLock()
@@ -163,16 +170,9 @@ func (c *Client) SetState(ctx context.Context, device *model.Device, cmd model.H
 		service = serviceParts[1]
 	}
 
-	payload := make(map[string]interface{})
-	if cmd.Data != nil {
-		if dm, ok := cmd.Data.(map[string]interface{}); ok {
-			for k, v := range dm {
-				if k == "effect" {
-					continue
-				}
-				payload[k] = v
-			}
-		}
+	payload := make(map[string]any)
+	for k, v := range cmd.Data {
+		payload[k] = v
 	}
 
 	// Handle OmitEntityID
@@ -207,12 +207,8 @@ func (c *Client) SetState(ctx context.Context, device *model.Device, cmd model.H
 	}
 
 	// Handle custom effects if provided
-	if cmd.Data != nil {
-		if dm, ok := cmd.Data.(map[string]interface{}); ok {
-			if effect, ok := dm["effect"].(string); ok && effect != "" {
-				c.executeEffect(ctx, effect, urlBase, token)
-			}
-		}
+	if cmd.Effect != "" {
+		c.executeEffect(ctx, cmd.Effect, urlBase, token)
 	}
 
 	return nil

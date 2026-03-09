@@ -303,7 +303,9 @@ func TestPortInterfacesShouldOnlyUseTypedModels(t *testing.T) {
 				}
 				for _, f := range fl.List {
 					typeStr := formatType(f.Type)
-					if strings.Contains(typeStr, "map[string]interface{}") {
+					if strings.Contains(typeStr, "map[string]interface{}") ||
+						strings.Contains(typeStr, "interface{}") ||
+						strings.Contains(typeStr, "any") {
 						methodName := ""
 						if len(field.Names) > 0 {
 							methodName = field.Names[0].Name

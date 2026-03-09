@@ -28,7 +28,16 @@ type Device struct {
 	VirtualDevice *VirtualDevice
 }
 
+type HAFields map[string]any
+
+type HAEntityState struct {
+	EntityID   string
+	State      string
+	Attributes HAFields
+}
+
 type HomeAssistantCommand struct {
 	Service string
-	Data    any
+	Data    HAFields
+	Effect  string
 }

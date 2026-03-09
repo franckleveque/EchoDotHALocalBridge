@@ -6,15 +6,11 @@ import (
 
 type CoverStrategy struct{}
 
-func (s *CoverStrategy) ToHue(haState any, vd *model.VirtualDevice) *model.DeviceState {
-	haMap, _ := haState.(map[string]interface{})
+func (s *CoverStrategy) ToHue(haState model.HAEntityState, vd *model.VirtualDevice) *model.DeviceState {
 	state := &model.DeviceState{}
-	val, _ := haMap["state"].(string)
-	state.On = (val != "closed")
-	if attr, ok := haMap["attributes"].(map[string]interface{}); ok {
-		if pos, ok := attr["current_position"].(float64); ok {
-			state.Bri = uint8(pos * 254 / 100)
-		}
+	state.On = (haState.State != "closed")
+	if pos, ok := haState.Attributes["current_position"].(float64); ok {
+		state.Bri = uint8(pos * 254 / 100)
 	}
 	state.Reachable = true
 	return state
@@ -22,7 +18,7 @@ func (s *CoverStrategy) ToHue(haState any, vd *model.VirtualDevice) *model.Devic
 
 func (s *CoverStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) model.HomeAssistantCommand {
 	service := "set_cover_position"
-	params := make(map[string]interface{})
+	params := make(model.HAFields)
 
 	// Check if this was a brightness (position) update or just toggle
 	if hueState.UpdatedByBri {
@@ -35,14 +31,13 @@ func (s *CoverStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevic
 		}
 	}
 
+	var effect string
 	if vd.ActionConfig != nil {
 		if hueState.On {
 			if vd.ActionConfig.OnService != "" {
 				service = vd.ActionConfig.OnService
 			}
-			if vd.ActionConfig.OnEffect != "" {
-				params["effect"] = vd.ActionConfig.OnEffect
-			}
+			effect = vd.ActionConfig.OnEffect
 			for k, v := range vd.ActionConfig.OnPayload {
 				params[k] = v
 			}
@@ -50,9 +45,7 @@ func (s *CoverStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevic
 			if vd.ActionConfig.OffService != "" {
 				service = vd.ActionConfig.OffService
 			}
-			if vd.ActionConfig.OffEffect != "" {
-				params["effect"] = vd.ActionConfig.OffEffect
-			}
+			effect = vd.ActionConfig.OffEffect
 			for k, v := range vd.ActionConfig.OffPayload {
 				params[k] = v
 			}
@@ -62,6 +55,7 @@ func (s *CoverStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevic
 	return model.HomeAssistantCommand{
 		Service: service,
 		Data:    params,
+		Effect:  effect,
 	}
 }
 

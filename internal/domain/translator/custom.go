@@ -8,24 +8,20 @@ import (
 
 type CustomStrategy struct{}
 
-func (s *CustomStrategy) ToHue(haState any, vd *model.VirtualDevice) *model.DeviceState {
-	haMap, _ := haState.(map[string]interface{})
+func (s *CustomStrategy) ToHue(haState model.HAEntityState, vd *model.VirtualDevice) *model.DeviceState {
 	state := &model.DeviceState{}
-	valStr, _ := haMap["state"].(string)
-	state.On = (valStr != "off" && valStr != "closed" && valStr != "unavailable")
+	state.On = (haState.State != "off" && haState.State != "closed" && haState.State != "unavailable")
 
 	// Default to brightness/level if available
 	var input float64
-	if attr, ok := haMap["attributes"].(map[string]interface{}); ok {
-		if v, ok := attr["brightness"].(float64); ok {
-			input = v
-		} else if v, ok := attr["current_position"].(float64); ok {
-			input = v
-		} else if v, ok := attr["temperature"].(float64); ok {
-			input = v
-		} else if v, ok := attr["value"].(float64); ok {
-			input = v
-		}
+	if v, ok := haState.Attributes["brightness"].(float64); ok {
+		input = v
+	} else if v, ok := haState.Attributes["current_position"].(float64); ok {
+		input = v
+	} else if v, ok := haState.Attributes["temperature"].(float64); ok {
+		input = v
+	} else if v, ok := haState.Attributes["value"].(float64); ok {
+		input = v
 	}
 
 	if vd.ActionConfig != nil && vd.ActionConfig.ToHueFormula != "" {
@@ -44,7 +40,7 @@ func (s *CustomStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevi
 		service = "turn_off"
 	}
 
-	params := make(map[string]interface{})
+	params := make(model.HAFields)
 	input := float64(hueState.Bri)
 	var output float64
 	if vd.ActionConfig != nil && vd.ActionConfig.ToHAFormula != "" {
@@ -71,14 +67,13 @@ func (s *CustomStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevi
 		params["value"] = output
 	}
 
+	var effect string
 	if vd.ActionConfig != nil {
 		if hueState.On {
 			if vd.ActionConfig.OnService != "" {
 				service = vd.ActionConfig.OnService
 			}
-			if vd.ActionConfig.OnEffect != "" {
-				params["effect"] = vd.ActionConfig.OnEffect
-			}
+			effect = vd.ActionConfig.OnEffect
 			// Merge custom ON payload
 			for k, v := range vd.ActionConfig.OnPayload {
 				params[k] = v
@@ -87,9 +82,7 @@ func (s *CustomStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevi
 			if vd.ActionConfig.OffService != "" {
 				service = vd.ActionConfig.OffService
 			}
-			if vd.ActionConfig.OffEffect != "" {
-				params["effect"] = vd.ActionConfig.OffEffect
-			}
+			effect = vd.ActionConfig.OffEffect
 			// Merge custom OFF payload
 			for k, v := range vd.ActionConfig.OffPayload {
 				params[k] = v
@@ -100,6 +93,7 @@ func (s *CustomStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevi
 	return model.HomeAssistantCommand{
 		Service: service,
 		Data:    params,
+		Effect:  effect,
 	}
 }
 

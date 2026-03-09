@@ -6,21 +6,18 @@ import (
 
 type ClimateStrategy struct{}
 
-func (s *ClimateStrategy) ToHue(haState any, vd *model.VirtualDevice) *model.DeviceState {
-	haMap, _ := haState.(map[string]interface{})
+func (s *ClimateStrategy) ToHue(haState model.HAEntityState, vd *model.VirtualDevice) *model.DeviceState {
 	state := &model.DeviceState{}
 	state.On = true
-	if attr, ok := haMap["attributes"].(map[string]interface{}); ok {
-		if temp, ok := attr["temperature"].(float64); ok {
-			// Map 7-28°C to 0-254
-			if temp < 7 {
-				temp = 7
-			}
-			if temp > 28 {
-				temp = 28
-			}
-			state.Bri = uint8((temp - 7) * 254 / (28 - 7))
+	if temp, ok := haState.Attributes["temperature"].(float64); ok {
+		// Map 7-28°C to 0-254
+		if temp < 7 {
+			temp = 7
 		}
+		if temp > 28 {
+			temp = 28
+		}
+		state.Bri = uint8((temp - 7) * 254 / (28 - 7))
 	}
 	state.Reachable = true
 	return state
@@ -28,18 +25,17 @@ func (s *ClimateStrategy) ToHue(haState any, vd *model.VirtualDevice) *model.Dev
 
 func (s *ClimateStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) model.HomeAssistantCommand {
 	service := "set_temperature"
-	params := make(map[string]interface{})
+	params := make(model.HAFields)
 	temp := 7.0 + (float64(hueState.Bri) * (28.0 - 7.0) / 254.0)
 	params["temperature"] = temp
 
+	var effect string
 	if vd.ActionConfig != nil {
 		if hueState.On {
 			if vd.ActionConfig.OnService != "" {
 				service = vd.ActionConfig.OnService
 			}
-			if vd.ActionConfig.OnEffect != "" {
-				params["effect"] = vd.ActionConfig.OnEffect
-			}
+			effect = vd.ActionConfig.OnEffect
 			for k, v := range vd.ActionConfig.OnPayload {
 				params[k] = v
 			}
@@ -47,9 +43,7 @@ func (s *ClimateStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDev
 			if vd.ActionConfig.OffService != "" {
 				service = vd.ActionConfig.OffService
 			}
-			if vd.ActionConfig.OffEffect != "" {
-				params["effect"] = vd.ActionConfig.OffEffect
-			}
+			effect = vd.ActionConfig.OffEffect
 			for k, v := range vd.ActionConfig.OffPayload {
 				params[k] = v
 			}
@@ -59,6 +53,7 @@ func (s *ClimateStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDev
 	return model.HomeAssistantCommand{
 		Service: service,
 		Data:    params,
+		Effect:  effect,
 	}
 }
 

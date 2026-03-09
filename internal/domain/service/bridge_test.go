@@ -15,9 +15,12 @@ type MockHAPort struct {
 	mock.Mock
 }
 
-func (m *MockHAPort) GetRawStates(ctx context.Context) ([]interface{}, error) {
+func (m *MockHAPort) GetRawStates(ctx context.Context) ([]model.HAEntityState, error) {
 	args := m.Called(ctx)
-	return args.Get(0).([]interface{}), args.Error(1)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]model.HAEntityState), args.Error(1)
 }
 
 func (m *MockHAPort) GetAllEntities(ctx context.Context) ([]ports.HomeAssistantEntity, error) {
@@ -34,11 +37,6 @@ func (m *MockHAPort) Configure(url, token string) {
 	m.Called(url, token)
 }
 
-func (m *MockHAPort) IsConfigured() bool {
-	args := m.Called()
-	return args.Bool(0)
-}
-
 type MockTranslatorFactory struct {
 	mock.Mock
 }
@@ -52,7 +50,7 @@ type MockTranslator struct {
 	mock.Mock
 }
 
-func (m *MockTranslator) ToHue(haState any, vd *model.VirtualDevice) *model.DeviceState {
+func (m *MockTranslator) ToHue(haState model.HAEntityState, vd *model.VirtualDevice) *model.DeviceState {
 	args := m.Called(haState, vd)
 	return args.Get(0).(*model.DeviceState)
 }
@@ -96,20 +94,19 @@ func TestBridgeService_PayloadMerging(t *testing.T) {
 
 	cfg := &model.Config{VirtualDevices: []*model.VirtualDevice{vd}}
 	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
-	mockHA.On("IsConfigured").Return(true)
-	mockHA.On("GetRawStates", mock.Anything).Return([]interface{}{
-		map[string]interface{}{"entity_id": "camera.salon", "state": "idle"},
+	mockHA.On("GetRawStates", mock.Anything).Return([]model.HAEntityState{
+		{EntityID: "camera.salon", State: "idle"},
 	}, nil)
 
 	mockTF.On("GetTranslator", model.MappingTypeCustom).Return(mockT)
 	mockT.On("ToHue", mock.Anything, mock.Anything).Return(&model.DeviceState{On: false})
 	mockT.On("ToHA", mock.Anything, mock.Anything).Return(model.HomeAssistantCommand{
 		Service: "camera.record",
-		Data:    map[string]interface{}{"duration": 30.0},
+		Data:    model.HAFields{"duration": 30.0},
 	})
 
 	mockHA.On("SetState", mock.Anything, mock.Anything, mock.MatchedBy(func(cmd model.HomeAssistantCommand) bool {
-		p := cmd.Data.(map[string]interface{})
+		p := cmd.Data
 		return cmd.Service == "camera.record" && p["duration"] == 30.0
 	})).Return(nil)
 
@@ -141,9 +138,8 @@ func TestBridgeService_NoOpAndPayload(t *testing.T) {
 
 	cfg := &model.Config{VirtualDevices: []*model.VirtualDevice{vd}}
 	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
-	mockHA.On("IsConfigured").Return(true)
-	mockHA.On("GetRawStates", mock.Anything).Return([]interface{}{
-		map[string]interface{}{"entity_id": "light.noop", "state": "on"},
+	mockHA.On("GetRawStates", mock.Anything).Return([]model.HAEntityState{
+		{EntityID: "light.noop", State: "on"},
 	}, nil)
 
 	mockTF.On("GetTranslator", model.MappingTypeLight).Return(mockT)
@@ -178,19 +174,20 @@ func TestBridgeService_OmitEntityID(t *testing.T) {
 
 	cfg := &model.Config{VirtualDevices: []*model.VirtualDevice{vd}}
 	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
-	mockHA.On("IsConfigured").Return(true)
-	mockHA.On("GetRawStates", mock.Anything).Return([]interface{}{}, nil)
+	mockHA.On("GetRawStates", mock.Anything).Return([]model.HAEntityState{}, nil)
 
 	mockTF.On("GetTranslator", model.MappingTypeCustom).Return(mockT)
 	mockT.On("ToHue", mock.Anything, mock.Anything).Return(&model.DeviceState{On: false})
 	mockT.On("ToHA", mock.Anything, mock.Anything).Return(model.HomeAssistantCommand{
 		Service: "script.test",
-		Data:    map[string]interface{}{},
+		Data:    model.HAFields{},
 	})
 
 	mockHA.On("SetState", mock.Anything, mock.MatchedBy(func(d *model.Device) bool {
 		return d.ExternalID == "script.test"
-	}), mock.Anything).Return(nil)
+	}), mock.MatchedBy(func(cmd model.HomeAssistantCommand) bool {
+		return cmd.Service == "script.test"
+	})).Return(nil)
 
 	s := NewBridgeService(mockHA, mockRepo, mockTF)
 	_, _ = s.GetDevices(context.Background())
@@ -208,7 +205,6 @@ func TestBridgeService_RefreshDevices_Error(t *testing.T) {
 
 	// Error getting config
 	mockRepo.On("Get", mock.Anything).Return((*model.Config)(nil), fmt.Errorf("config error")).Once()
-	mockHA.On("IsConfigured").Return(true)
 	s := NewBridgeService(mockHA, mockRepo, mockTF)
 	err := s.RefreshDevices(context.Background())
 	assert.Error(t, err)
@@ -216,21 +212,13 @@ func TestBridgeService_RefreshDevices_Error(t *testing.T) {
 
 	// Error getting states
 	mockRepo.On("Get", mock.Anything).Return(&model.Config{}, nil).Once()
-	mockHA.On("GetRawStates", mock.Anything).Return([]interface{}(nil), fmt.Errorf("api error")).Once()
+	mockHA.On("GetRawStates", mock.Anything).Return([]model.HAEntityState(nil), fmt.Errorf("api error")).Once()
 	// Set lastRefresh to old value to bypass cooldown
 	s.lastRefresh = time.Now().Add(-10 * time.Second)
 
 	err = s.RefreshDevices(context.Background())
 	assert.Error(t, err)
 	assert.Equal(t, "api error", err.Error())
-
-	// Coverage for invalid raw state
-	mockRepo.On("Get", mock.Anything).Return(&model.Config{}, nil).Once()
-	mockHA.On("GetRawStates", mock.Anything).Return([]interface{}{"invalid"}, nil).Once()
-	// Set lastRefresh to old value to bypass cooldown
-	s.lastRefresh = time.Now().Add(-10 * time.Second)
-	err = s.RefreshDevices(context.Background())
-	assert.NoError(t, err)
 }
 
 func TestBridgeService_GetDevices(t *testing.T) {
@@ -245,9 +233,8 @@ func TestBridgeService_GetDevices(t *testing.T) {
 		},
 	}
 	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
-	mockHA.On("IsConfigured").Return(true)
-	mockHA.On("GetRawStates", mock.Anything).Return([]interface{}{
-		map[string]interface{}{"entity_id": "light.test", "state": "on", "attributes": map[string]interface{}{"brightness": 100.0}},
+	mockHA.On("GetRawStates", mock.Anything).Return([]model.HAEntityState{
+		{EntityID: "light.test", State: "on", Attributes: model.HAFields{"brightness": 100.0}},
 	}, nil)
 
 	mockTF.On("GetTranslator", model.MappingTypeLight).Return(mockT)
@@ -279,9 +266,8 @@ func TestBridgeService_MultiIntentions(t *testing.T) {
 		},
 	}
 	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
-	mockHA.On("IsConfigured").Return(true)
-	mockHA.On("GetRawStates", mock.Anything).Return([]interface{}{
-		map[string]interface{}{"entity_id": "camera.salon", "state": "idle"},
+	mockHA.On("GetRawStates", mock.Anything).Return([]model.HAEntityState{
+		{EntityID: "camera.salon", State: "idle"},
 	}, nil)
 
 	mockTF.On("GetTranslator", model.MappingTypeCustom).Return(mockT)
@@ -313,9 +299,8 @@ func TestBridgeService_UpdateDeviceState(t *testing.T) {
 		VirtualDevices: []*model.VirtualDevice{vd},
 	}
 	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
-	mockHA.On("IsConfigured").Return(true)
-	mockHA.On("GetRawStates", mock.Anything).Return([]interface{}{
-		map[string]interface{}{"entity_id": "light.test", "state": "off"},
+	mockHA.On("GetRawStates", mock.Anything).Return([]model.HAEntityState{
+		{EntityID: "light.test", State: "off"},
 	}, nil)
 
 	mockTF.On("GetTranslator", model.MappingTypeLight).Return(mockT)
@@ -374,8 +359,7 @@ func TestBridgeService_Config(t *testing.T) {
 		return c.VirtualDevices[1].HueID == "6"
 	})).Return(nil)
 	mockHA.On("Configure", "http://localhost", "token").Return()
-	mockHA.On("IsConfigured").Return(true)
-	mockHA.On("GetRawStates", mock.Anything).Return([]interface{}{}, nil)
+	mockHA.On("GetRawStates", mock.Anything).Return([]model.HAEntityState{}, nil)
 
 	mockTF.On("GetTranslator", mock.Anything).Return(mockT)
 	mockT.On("ToHue", mock.Anything, mock.Anything).Return(&model.DeviceState{})
@@ -413,7 +397,6 @@ func TestBridgeService_GetDevices_Error(t *testing.T) {
 	mockHA := new(MockHAPort)
 	mockRepo := new(MockConfigRepo)
 	mockTF := new(MockTranslatorFactory)
-	mockHA.On("IsConfigured").Return(true)
 	mockRepo.On("Get", mock.Anything).Return(&model.Config{}, fmt.Errorf("repo error"))
 
 	s := NewBridgeService(mockHA, mockRepo, mockTF)
@@ -431,8 +414,7 @@ func TestBridgeService_UpdateDeviceState_SetStateError(t *testing.T) {
 	cfg := &model.Config{VirtualDevices: []*model.VirtualDevice{vd}}
 
 	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
-	mockHA.On("IsConfigured").Return(true)
-	mockHA.On("GetRawStates", mock.Anything).Return([]interface{}{map[string]interface{}{"entity_id": "light.test", "state": "on"}}, nil)
+	mockHA.On("GetRawStates", mock.Anything).Return([]model.HAEntityState{{EntityID: "light.test", State: "on"}}, nil)
 
 	mockTF.On("GetTranslator", model.MappingTypeLight).Return(mockT)
 	mockT.On("ToHue", mock.Anything, mock.Anything).Return(&model.DeviceState{On: true})
@@ -499,7 +481,7 @@ func TestBridgeService_GetRawStates(t *testing.T) {
 	mockHA := new(MockHAPort)
 	mockRepo := new(MockConfigRepo)
 	mockTF := new(MockTranslatorFactory)
-	states := []interface{}{map[string]interface{}{"entity_id": "light.test"}}
+	states := []model.HAEntityState{{EntityID: "light.test"}}
 	mockHA.On("GetRawStates", mock.Anything).Return(states, nil)
 
 	s := NewBridgeService(mockHA, mockRepo, mockTF)
@@ -515,8 +497,7 @@ func TestBridgeService_RefreshCooldown(t *testing.T) {
 
 	cfg := &model.Config{VirtualDevices: []*model.VirtualDevice{}}
 	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
-	mockHA.On("IsConfigured").Return(true)
-	mockHA.On("GetRawStates", mock.Anything).Return([]interface{}{}, nil).Once()
+	mockHA.On("GetRawStates", mock.Anything).Return([]model.HAEntityState{}, nil).Once()
 
 	s := NewBridgeService(mockHA, mockRepo, mockTF)
 
@@ -535,10 +516,13 @@ func TestBridgeService_Refresh_NotConfigured(t *testing.T) {
 	mockHA := new(MockHAPort)
 	mockRepo := new(MockConfigRepo)
 	mockTF := new(MockTranslatorFactory)
-	mockHA.On("IsConfigured").Return(false)
+	// RefreshDevices calls Get() then checks if it's configured.
+	mockRepo.On("Get", mock.Anything).Return((*model.Config)(nil), fmt.Errorf("not configured")).Once()
 	s := NewBridgeService(mockHA, mockRepo, mockTF)
+	// Bypass cooldown
+	s.lastRefresh = time.Now().Add(-10 * time.Second)
 	err := s.RefreshDevices(context.Background())
-	assert.NoError(t, err)
+	assert.Error(t, err)
 }
 
 func TestBridgeService_Refresh_EntityNotFound(t *testing.T) {
@@ -548,8 +532,7 @@ func TestBridgeService_Refresh_EntityNotFound(t *testing.T) {
 	mockT := new(MockTranslator)
 	cfg := &model.Config{VirtualDevices: []*model.VirtualDevice{{HueID: "1", EntityID: "light.missing", Type: model.MappingTypeLight}}}
 	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
-	mockHA.On("IsConfigured").Return(true)
-	mockHA.On("GetRawStates", mock.Anything).Return([]interface{}{}, nil)
+	mockHA.On("GetRawStates", mock.Anything).Return([]model.HAEntityState{}, nil)
 
 	mockTF.On("GetTranslator", model.MappingTypeLight).Return(mockT)
 	mockT.On("ToHue", mock.Anything, mock.Anything).Return(&model.DeviceState{})
@@ -571,7 +554,7 @@ func TestBridgeService_Start(t *testing.T) {
 	RefreshInterval = 10 * time.Millisecond
 	defer func() { RefreshInterval = oldInterval }()
 
-	mockHA.On("IsConfigured").Return(false) // Just to make RefreshDevices do nothing quickly
+	mockRepo.On("Get", mock.Anything).Return((*model.Config)(nil), fmt.Errorf("not configured")).Maybe()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s := NewBridgeService(mockHA, mockRepo, mockTF)
@@ -587,7 +570,11 @@ func TestBridgeService_GetDevice_NotFound(t *testing.T) {
 	mockHA := new(MockHAPort)
 	mockRepo := new(MockConfigRepo)
 	mockTF := new(MockTranslatorFactory)
+	// RefreshDevices calls Get() then checks if it's configured.
+	mockRepo.On("Get", mock.Anything).Return((*model.Config)(nil), fmt.Errorf("not configured")).Once()
 	s := NewBridgeService(mockHA, mockRepo, mockTF)
+	// Bypass cooldown
+	s.lastRefresh = time.Now().Add(-10 * time.Second)
 	_, err := s.GetDevice(context.Background(), "99")
 	assert.Error(t, err)
 }
@@ -621,9 +608,8 @@ func TestBridgeService_UpdateDeviceState_NoOpOn(t *testing.T) {
 
 	cfg := &model.Config{VirtualDevices: []*model.VirtualDevice{vd}}
 	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
-	mockHA.On("IsConfigured").Return(true)
-	mockHA.On("GetRawStates", mock.Anything).Return([]interface{}{
-		map[string]interface{}{"entity_id": "light.noop_on", "state": "off"},
+	mockHA.On("GetRawStates", mock.Anything).Return([]model.HAEntityState{
+		{EntityID: "light.noop_on", State: "off"},
 	}, nil)
 
 	mockTF.On("GetTranslator", model.MappingTypeLight).Return(mockT)
@@ -655,9 +641,8 @@ func TestBridgeService_UpdateDeviceState_BriWithoutOn(t *testing.T) {
 
 	cfg := &model.Config{VirtualDevices: []*model.VirtualDevice{vd}}
 	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
-	mockHA.On("IsConfigured").Return(true)
-	mockHA.On("GetRawStates", mock.Anything).Return([]interface{}{
-		map[string]interface{}{"entity_id": "light.bri_on", "state": "off"},
+	mockHA.On("GetRawStates", mock.Anything).Return([]model.HAEntityState{
+		{EntityID: "light.bri_on", State: "off"},
 	}, nil)
 
 	mockTF.On("GetTranslator", model.MappingTypeLight).Return(mockT)

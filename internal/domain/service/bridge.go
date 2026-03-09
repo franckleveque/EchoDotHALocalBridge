@@ -82,9 +82,6 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 		return nil
 	}
 
-	if !s.haPort.IsConfigured() {
-		return nil
-	}
 
 	slog.Info("Bridge: refreshing devices from HA")
 
@@ -100,15 +97,9 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 	}
 
 	// Index HA states by entity_id
-	stateMap := make(map[string]map[string]interface{})
-	for _, rawState := range states {
-		state, ok := rawState.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if eid, ok := state["entity_id"].(string); ok {
-			stateMap[eid] = state
-		}
+	stateMap := make(map[string]model.HAEntityState)
+	for _, state := range states {
+		stateMap[state.EntityID] = state
 	}
 
 	s.mu.Lock()
@@ -116,9 +107,9 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 	newDevices := make(map[string]*model.Device)
 
 	for _, vd := range cfg.VirtualDevices {
-		state := stateMap[vd.EntityID]
-		if state == nil {
-			state = map[string]interface{}{"entity_id": vd.EntityID, "state": "unavailable"}
+		state, exists := stateMap[vd.EntityID]
+		if !exists {
+			state = model.HAEntityState{EntityID: vd.EntityID, State: "unavailable"}
 		}
 
 		t := s.translatorFactory.GetTranslator(vd.Type)
@@ -282,7 +273,9 @@ func (s *BridgeService) UpdateConfig(ctx context.Context, cfg *model.Config) err
 	if err != nil {
 		return err
 	}
-	s.haPort.Configure(cfg.HassURL, cfg.HassToken)
+	if rc, ok := s.haPort.(ports.Reconfigurable); ok {
+		rc.Configure(cfg.HassURL, cfg.HassToken)
+	}
 
 	// Force refresh
 	s.refreshMu.Lock()
