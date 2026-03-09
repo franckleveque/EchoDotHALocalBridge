@@ -121,11 +121,11 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 
 		newDevices := make(map[string]*model.Device)
 
-		fmt.Printf("Bridge: processing %d virtual devices, HA state map size: %d\n", len(cfg.VirtualDevices), len(stateMap))
+		slog.Debug("Bridge: processing virtual devices", "count", len(cfg.VirtualDevices), "ha_state_map_size", len(stateMap))
 		for _, vd := range cfg.VirtualDevices {
 			state, exists := stateMap[vd.EntityID]
 			if !exists {
-				fmt.Printf("Bridge: entity %s not found in HA states\n", vd.EntityID)
+				slog.Warn("Bridge: entity not found in HA states", "entity_id", vd.EntityID)
 				state = model.HAEntityState{EntityID: vd.EntityID, State: "unavailable"}
 			}
 

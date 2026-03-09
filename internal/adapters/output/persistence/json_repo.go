@@ -47,8 +47,18 @@ type legacyCustomFormula struct {
 }
 
 func NewJSONConfigRepository(filepath string) *JSONConfigRepository {
-	// Simple static key for token encryption. In a real scenario, this could be from an env var.
+	// Static key for token encryption. Can be overridden via HUE_ENCRYPTION_KEY env var.
 	key := []byte("a-very-secret-key-32-chars-long!")
+	if envKey := os.Getenv("HUE_ENCRYPTION_KEY"); len(envKey) >= 16 {
+		// Use the first 16, 24, or 32 chars for the key
+		if len(envKey) >= 32 {
+			key = []byte(envKey[:32])
+		} else if len(envKey) >= 24 {
+			key = []byte(envKey[:24])
+		} else {
+			key = []byte(envKey[:16])
+		}
+	}
 	return &JSONConfigRepository{filepath: filepath, key: key}
 }
 
@@ -99,10 +109,17 @@ func (r *JSONConfigRepository) Get(ctx context.Context) (*model.Config, error) {
 
 	if cfg.HassToken != "" {
 		decrypted, err := r.decrypt(cfg.HassToken)
-		if err != nil {
-			// If decryption fails, assume it's already plaintext (e.g. first run after update)
-		} else {
+		if err == nil {
 			cfg.HassToken = decrypted
+		} else {
+			// If decryption fails, it could be plaintext (e.g. first run after update)
+			// Check if it's base64 encoded, if not, it's definitely plaintext or corrupted
+			if _, decodeErr := base64.StdEncoding.DecodeString(cfg.HassToken); decodeErr != nil {
+				// Not base64, likely plaintext
+			} else {
+				// It was base64 but decryption failed - possibly wrong key
+				return nil, fmt.Errorf("failed to decrypt HA token: %w", err)
+			}
 		}
 	}
 

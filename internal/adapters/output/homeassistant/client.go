@@ -158,12 +158,21 @@ func (c *Client) executeEffect(ctx context.Context, effect, urlBase, token strin
 	}
 
 	url := fmt.Sprintf("%s/api/services/%s/%s", urlBase, parts[0], parts[1])
-	req, _ := http.NewRequestWithContext(ctx, "POST", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	if err != nil {
+		slog.Error("Failed to create request for effect", "error", err, "url", url)
+		return
+	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		slog.Error("Failed to execute effect", "error", err, "url", url)
 		return
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		slog.Warn("Effect call returned error", "status", resp.StatusCode, "url", url)
+	}
 }
 
