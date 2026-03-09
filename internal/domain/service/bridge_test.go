@@ -337,13 +337,59 @@ func TestBridgeService_GetAllEntities(t *testing.T) {
 	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
 	mockHA.On("GetRawStates", mock.Anything).Return([]model.HAEntityState{
 		{EntityID: "light.test", State: "on", Attributes: model.HAFields{"friendly_name": "Test Light"}},
-	}, nil)
+	}, nil).Once()
 
 	s := NewBridgeService(mockHA, mockRepo, mockTF)
 	res, err := s.GetAllEntities(context.Background())
 
 	assert.NoError(t, err)
 	assert.Equal(t, entities, res)
+
+	// Test cached path
+	res2, err := s.GetAllEntities(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, entities, res2)
+
+	mockHA.AssertExpectations(t)
+}
+
+func TestBridgeService_SetIgnoredDomains(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+	mockTF := new(MockTranslatorFactory)
+
+	s := NewBridgeService(mockHA, mockRepo, mockTF)
+	s.SetIgnoredDomains([]string{"custom."})
+
+	// Setup for GetAllEntities to see if it uses the ignored domains
+	mockRepo.On("Get", mock.Anything).Return(&model.Config{}, nil)
+	mockHA.On("GetRawStates", mock.Anything).Return([]model.HAEntityState{
+		{EntityID: "light.test", State: "on"},
+		{EntityID: "custom.ignored", State: "on"},
+	}, nil).Once()
+
+	res, err := s.GetAllEntities(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, res, 1)
+	assert.Equal(t, "light.test", res[0].EntityID)
+
+	// Test error path
+	s.lastRefresh = time.Now().Add(-10 * time.Second)
+	mockHA.On("GetRawStates", mock.Anything).Return([]model.HAEntityState(nil), fmt.Errorf("api error")).Once()
+	_, err = s.GetAllEntities(context.Background())
+	assert.Error(t, err)
+
+	// Test fallback names
+	mockHA.On("GetRawStates", mock.Anything).Return([]model.HAEntityState{
+		{EntityID: "light.no_name", State: "on"},
+		{EntityID: "light.attr_name", State: "on", Attributes: model.HAFields{"name": "Attr Name"}},
+	}, nil).Once()
+	s.lastRefresh = time.Now().Add(-10 * time.Second)
+	res2, err := s.GetAllEntities(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, res2, 2)
+	assert.Equal(t, "light.no_name", res2[0].FriendlyName)
+	assert.Equal(t, "Attr Name", res2[1].FriendlyName)
 }
 
 func TestBridgeService_Config(t *testing.T) {

@@ -277,7 +277,7 @@ func (s *BridgeService) UpdateConfig(ctx context.Context, cfg *model.Config) err
 func (s *BridgeService) GetAllEntities(ctx context.Context) ([]ports.HomeAssistantEntity, error) {
 	s.mu.RLock()
 	if s.initialized && time.Since(s.lastRefresh) < 2*time.Second {
-		entities := s.extractEntities(s.cachedHAStates)
+		entities := s.extractEntities(s.cachedHAStates, s.ignoredDomains)
 		s.mu.RUnlock()
 		return entities, nil
 	}
@@ -289,7 +289,7 @@ func (s *BridgeService) GetAllEntities(ctx context.Context) ([]ports.HomeAssista
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.extractEntities(s.cachedHAStates), nil
+	return s.extractEntities(s.cachedHAStates, s.ignoredDomains), nil
 }
 
 func (s *BridgeService) assignHueIDs(cfg *model.Config) {
@@ -317,11 +317,8 @@ func (s *BridgeService) SetIgnoredDomains(domains []string) {
 	s.ignoredDomains = domains
 }
 
-func (s *BridgeService) extractEntities(states []model.HAEntityState) []ports.HomeAssistantEntity {
+func (s *BridgeService) extractEntities(states []model.HAEntityState, ignored []string) []ports.HomeAssistantEntity {
 	var entities []ports.HomeAssistantEntity
-	s.mu.RLock()
-	ignored := s.ignoredDomains
-	s.mu.RUnlock()
 	for _, s := range states {
 		if !s.IsSupported(ignored) {
 			continue
