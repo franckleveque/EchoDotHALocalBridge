@@ -16,15 +16,14 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
-      - name: Run Unit Tests
-        run: go test -v -coverprofile=coverage.out ./...
-      - name: Run E2E Tests
-        run: go test -v -tags e2e ./internal/e2e/...
+      - name: Run Tests with Coverage
+        run: go test -v -tags e2e -coverprofile=coverage.out -coverpkg=./... ./...
       - name: Code Coverage Report
         run: go tool cover -func=coverage.out
       - name: Verify Coverage
         run: |
           # Domain coverage must be 100%
+          # (Domain tests don't need e2e tag, but we use it for consistency if needed)
           go test -v -coverprofile=domain.out ./internal/domain/... || exit 1
           DOMAIN_COV=$(go tool cover -func=domain.out | grep total | awk '{print $3}' | sed 's/%//')
           echo "Domain Coverage: $DOMAIN_COV%"
@@ -33,17 +32,15 @@ jobs:
             exit 1
           fi
 
-          # Global coverage (excluding non-testable adapters) should be >= 50%
+          # Global coverage (including all but SSDP and main entry point) should be >= 60% with E2E tests
           TESTABLE_PKGS=$(go list ./... | grep -v 'adapters/input/ssdp' \
-                                      | grep -v 'adapters/input/http' \
-                                      | grep -v 'adapters/output/homeassistant' \
                                       | grep -v 'cmd/bridge' \
                                       | tr '\n' ' ')
-          go test -v -coverprofile=global.out $TESTABLE_PKGS || exit 1
+          go test -v -tags e2e -coverprofile=global.out -coverpkg=./... $TESTABLE_PKGS || exit 1
           GLOBAL_COV=$(go tool cover -func=global.out | grep total | awk '{print $3}' | sed 's/%//')
-          echo "Global (testable) Coverage: $GLOBAL_COV%"
-          if [ "$(echo "$GLOBAL_COV 50" | awk '{if ($1 < $2) print 1; else print 0}')" -eq 1 ]; then
-            echo "Global (testable) coverage is below 50%"
+          echo "Global Coverage (with E2E): $GLOBAL_COV%"
+          if [ "$(echo "$GLOBAL_COV 60" | awk '{if ($1 < $2) print 1; else print 0}')" -eq 1 ]; then
+            echo "Global coverage (with E2E) is below 60%"
             exit 1
           fi
 
