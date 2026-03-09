@@ -16,8 +16,10 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
-      - name: Run Tests
+      - name: Run Unit Tests
         run: go test -v -coverprofile=coverage.out ./...
+      - name: Run E2E Tests
+        run: go test -v -tags e2e ./internal/e2e/...
       - name: Code Coverage Report
         run: go tool cover -func=coverage.out
       - name: Verify Coverage
