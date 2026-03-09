@@ -83,10 +83,10 @@ func (c *Client) GetAllEntities(ctx context.Context) ([]ports.HomeAssistantEntit
 	return entities, nil
 }
 
-func (c *Client) GetRawStates(ctx context.Context) ([]interface{}, error) {
+func (c *Client) GetRawStates(ctx context.Context) ([]any, error) {
 	c.mu.RLock()
 	if time.Since(c.cacheTime) < 2*time.Second {
-		res := make([]interface{}, len(c.cacheStates))
+		res := make([]any, len(c.cacheStates))
 		for i, v := range c.cacheStates {
 			res[i] = v
 		}
@@ -137,7 +137,7 @@ func (c *Client) GetRawStates(ctx context.Context) ([]interface{}, error) {
 	c.cacheTime = time.Now()
 	c.mu.Unlock()
 
-	res := make([]interface{}, len(states))
+	res := make([]any, len(states))
 	for i, v := range states {
 		res[i] = v
 	}

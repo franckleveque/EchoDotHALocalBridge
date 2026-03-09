@@ -206,13 +206,31 @@ func TestBridgeService_RefreshDevices_Error(t *testing.T) {
 	mockRepo := new(MockConfigRepo)
 	mockTF := new(MockTranslatorFactory)
 
-	mockRepo.On("Get", mock.Anything).Return(&model.Config{}, nil)
+	// Error getting config
+	mockRepo.On("Get", mock.Anything).Return((*model.Config)(nil), fmt.Errorf("config error")).Once()
 	mockHA.On("IsConfigured").Return(true)
-	mockHA.On("GetRawStates", mock.Anything).Return([]interface{}(nil), fmt.Errorf("api error"))
-
 	s := NewBridgeService(mockHA, mockRepo, mockTF)
 	err := s.RefreshDevices(context.Background())
 	assert.Error(t, err)
+	assert.Equal(t, "config error", err.Error())
+
+	// Error getting states
+	mockRepo.On("Get", mock.Anything).Return(&model.Config{}, nil).Once()
+	mockHA.On("GetRawStates", mock.Anything).Return([]interface{}(nil), fmt.Errorf("api error")).Once()
+	// Set lastRefresh to old value to bypass cooldown
+	s.lastRefresh = time.Now().Add(-10 * time.Second)
+
+	err = s.RefreshDevices(context.Background())
+	assert.Error(t, err)
+	assert.Equal(t, "api error", err.Error())
+
+	// Coverage for invalid raw state
+	mockRepo.On("Get", mock.Anything).Return(&model.Config{}, nil).Once()
+	mockHA.On("GetRawStates", mock.Anything).Return([]interface{}{"invalid"}, nil).Once()
+	// Set lastRefresh to old value to bypass cooldown
+	s.lastRefresh = time.Now().Add(-10 * time.Second)
+	err = s.RefreshDevices(context.Background())
+	assert.NoError(t, err)
 }
 
 func TestBridgeService_GetDevices(t *testing.T) {
@@ -698,4 +716,18 @@ func TestBridgeService_CopyDevice(t *testing.T) {
 	d2 := &model.Device{ID: "2"}
 	dCopy2 := s.copyDevice(d2)
 	assert.Nil(t, dCopy2.State)
+}
+
+func TestBridgeService_GetDeviceMetadata(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+	mockTF := new(MockTranslatorFactory)
+	mockT := new(MockTranslator)
+
+	mockTF.On("GetTranslator", model.MappingTypeLight).Return(mockT)
+	mockT.On("GetMetadata").Return(model.HueMetadata{Type: "TestType"})
+
+	s := NewBridgeService(mockHA, mockRepo, mockTF)
+	meta := s.GetDeviceMetadata(model.MappingTypeLight)
+	assert.Equal(t, "TestType", meta.Type)
 }
