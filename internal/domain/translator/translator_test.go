@@ -286,6 +286,11 @@ func TestMetadata(t *testing.T) {
 
 func TestFactory(t *testing.T) {
 	f := NewFactory()
+	f.Register(model.MappingTypeLight, &LightStrategy{})
+	f.Register(model.MappingTypeCover, &CoverStrategy{})
+	f.Register(model.MappingTypeClimate, &ClimateStrategy{})
+	f.Register(model.MappingTypeCustom, &CustomStrategy{})
+
 	assert.IsType(t, &LightStrategy{}, f.GetTranslator(model.MappingTypeLight))
 	assert.IsType(t, &CoverStrategy{}, f.GetTranslator(model.MappingTypeCover))
 	assert.IsType(t, &ClimateStrategy{}, f.GetTranslator(model.MappingTypeClimate))

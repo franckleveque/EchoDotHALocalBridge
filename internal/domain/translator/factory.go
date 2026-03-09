@@ -11,17 +11,16 @@ type Factory struct {
 
 func NewFactory() *Factory {
 	return &Factory{
-		strategies: map[model.MappingType]Translator{
-			model.MappingTypeLight:   &LightStrategy{},
-			model.MappingTypeCover:   &CoverStrategy{},
-			model.MappingTypeClimate: &ClimateStrategy{},
-			model.MappingTypeCustom:  &CustomStrategy{},
-		},
+		strategies: make(map[model.MappingType]Translator),
 	}
 }
 
 // GetTranslator returns the strategy for the given mapping type.
 // If the type is unknown, it logs a warning and falls back to LightStrategy.
+func (f *Factory) Register(mappingType model.MappingType, strategy Translator) {
+	f.strategies[mappingType] = strategy
+}
+
 func (f *Factory) GetTranslator(mappingType model.MappingType) Translator {
 	if t, ok := f.strategies[mappingType]; ok {
 		return t

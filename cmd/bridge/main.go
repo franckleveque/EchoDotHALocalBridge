@@ -4,6 +4,7 @@ import (
 	"context"
 	"hue-bridge-emulator/internal/adapters/input/http"
 	"hue-bridge-emulator/internal/adapters/input/ssdp"
+	"hue-bridge-emulator/internal/domain/model"
 	"hue-bridge-emulator/internal/adapters/output/homeassistant"
 	"hue-bridge-emulator/internal/adapters/output/persistence"
 	"hue-bridge-emulator/internal/domain/service"
@@ -11,7 +12,9 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 )
 
 func main() {
@@ -55,7 +58,12 @@ func main() {
 
 	// HA Client
 	haClient := homeassistant.NewClient()
+
 	translatorFactory := translator.NewFactory()
+	translatorFactory.Register(model.MappingTypeLight, &translator.LightStrategy{})
+	translatorFactory.Register(model.MappingTypeCover, &translator.CoverStrategy{})
+	translatorFactory.Register(model.MappingTypeClimate, &translator.ClimateStrategy{})
+	translatorFactory.Register(model.MappingTypeCustom, &translator.CustomStrategy{})
 
 	// Load initial config if exists
 	cfg, err := configRepo.Get(context.Background())
@@ -69,8 +77,21 @@ func main() {
 		slog.Warn("Home Assistant not configured. Please use the Web Admin interface.")
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Handle graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		slog.Info("Shutting down...")
+		cancel()
+	}()
+
 	bridgeService := service.NewBridgeService(haClient, configRepo, translatorFactory)
-	bridgeService.Start(context.Background())
+	bridgeService.SetIgnoredDomains([]string{"zone.", "sun.", "weather."})
+	bridgeService.Start(ctx)
 
 	// Start SSDP Server
 	ssdpServer := ssdp.NewServer(ip)
@@ -92,7 +113,7 @@ func main() {
 	if port == "" {
 		port = "80"
 	}
-	httpServer := http.NewServer(bridgeService, authService, ip)
+	httpServer := http.NewServer(bridgeService, bridgeService, authService, ip)
 	slog.Info("HTTP Server listening", "address", "0.0.0.0:"+port)
 	if err := httpServer.ListenAndServe(":"+port); err != nil {
 		slog.Error("HTTP Server error", "error", err)

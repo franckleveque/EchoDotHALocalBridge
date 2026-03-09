@@ -23,10 +23,10 @@ type Server struct {
 	ip          string
 }
 
-func NewServer(bridge ports.BridgePort, authService ports.AuthService, ip string) *Server {
+func NewServer(hue ports.HueEmulationPort, admin ports.AdminPort, authService ports.AuthService, ip string) *Server {
 	return &Server{
-		hue:         bridge,
-		admin:       bridge,
+		hue:         hue,
+		admin:       admin,
 		authService: authService,
 		ip:          ip,
 	}

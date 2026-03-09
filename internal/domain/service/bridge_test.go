@@ -329,11 +329,19 @@ func TestBridgeService_GetAllEntities(t *testing.T) {
 	mockHA := new(MockHAPort)
 	mockRepo := new(MockConfigRepo)
 	mockTF := new(MockTranslatorFactory)
+
 	entities := []ports.HomeAssistantEntity{{EntityID: "light.test", FriendlyName: "Test Light"}}
-	mockHA.On("GetAllEntities", mock.Anything).Return(entities, nil)
+
+	// Setup expectations for RefreshDevices which is called by GetAllEntities when not cached
+	cfg := &model.Config{VirtualDevices: []*model.VirtualDevice{}}
+	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
+	mockHA.On("GetRawStates", mock.Anything).Return([]model.HAEntityState{
+		{EntityID: "light.test", State: "on", Attributes: model.HAFields{"friendly_name": "Test Light"}},
+	}, nil)
 
 	s := NewBridgeService(mockHA, mockRepo, mockTF)
 	res, err := s.GetAllEntities(context.Background())
+
 	assert.NoError(t, err)
 	assert.Equal(t, entities, res)
 }

@@ -15,7 +15,7 @@ import (
 var RefreshInterval = 30 * time.Second
 
 type BridgeService struct {
-	haPort            ports.HomeAssistantPort
+	haPort            ports.ReconfigurableHomeAssistantPort
 	configRepo        ports.ConfigRepository
 	translatorFactory ports.TranslatorFactory
 	devices           map[string]*model.Device
@@ -23,9 +23,11 @@ type BridgeService struct {
 	refreshMu         sync.Mutex
 	lastRefresh       time.Time
 	initialized       bool
+	cachedHAStates    []model.HAEntityState
+	ignoredDomains    []string
 }
 
-func NewBridgeService(haPort ports.HomeAssistantPort, configRepo ports.ConfigRepository, translatorFactory ports.TranslatorFactory) *BridgeService {
+func NewBridgeService(haPort ports.ReconfigurableHomeAssistantPort, configRepo ports.ConfigRepository, translatorFactory ports.TranslatorFactory) *BridgeService {
 	s := &BridgeService{
 		haPort:            haPort,
 		configRepo:        configRepo,
@@ -82,7 +84,6 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 		return nil
 	}
 
-
 	slog.Info("Bridge: refreshing devices from HA")
 
 	cfg, err := s.configRepo.Get(ctx)
@@ -96,14 +97,16 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 		return err
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cachedHAStates = states
+
 	// Index HA states by entity_id
 	stateMap := make(map[string]model.HAEntityState)
 	for _, state := range states {
 		stateMap[state.EntityID] = state
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	newDevices := make(map[string]*model.Device)
 
 	for _, vd := range cfg.VirtualDevices {
@@ -252,6 +255,44 @@ func (s *BridgeService) GetConfig(ctx context.Context) (*model.Config, error) {
 }
 
 func (s *BridgeService) UpdateConfig(ctx context.Context, cfg *model.Config) error {
+	s.assignHueIDs(cfg)
+
+	err := s.configRepo.Save(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	s.haPort.Configure(cfg.HassURL, cfg.HassToken)
+
+	// Force refresh
+	s.refreshMu.Lock()
+	s.lastRefresh = time.Now().Add(-5 * time.Second) // Ensure we can refresh
+	s.refreshMu.Unlock()
+
+	// We don't want to fail the whole update if Home Assistant is currently unreachable
+	_ = s.RefreshDevices(ctx)
+
+	return nil
+}
+
+func (s *BridgeService) GetAllEntities(ctx context.Context) ([]ports.HomeAssistantEntity, error) {
+	s.mu.RLock()
+	if s.initialized && time.Since(s.lastRefresh) < 2*time.Second {
+		entities := s.extractEntities(s.cachedHAStates)
+		s.mu.RUnlock()
+		return entities, nil
+	}
+	s.mu.RUnlock()
+
+	if err := s.RefreshDevices(ctx); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.extractEntities(s.cachedHAStates), nil
+}
+
+func (s *BridgeService) assignHueIDs(cfg *model.Config) {
 	// Ensure stable Hue IDs
 	maxID := 0
 	for _, vd := range cfg.VirtualDevices {
@@ -268,27 +309,41 @@ func (s *BridgeService) UpdateConfig(ctx context.Context, cfg *model.Config) err
 			vd.HueID = strconv.Itoa(maxID)
 		}
 	}
-
-	err := s.configRepo.Save(ctx, cfg)
-	if err != nil {
-		return err
-	}
-	if rc, ok := s.haPort.(ports.Reconfigurable); ok {
-		rc.Configure(cfg.HassURL, cfg.HassToken)
-	}
-
-	// Force refresh
-	s.refreshMu.Lock()
-	s.lastRefresh = time.Now().Add(-5 * time.Second) // Ensure we can refresh
-	s.refreshMu.Unlock()
-
-	// We don't want to fail the whole update if Home Assistant is currently unreachable
-	_ = s.RefreshDevices(ctx)
-
-	return nil
 }
 
-func (s *BridgeService) GetAllEntities(ctx context.Context) ([]ports.HomeAssistantEntity, error) {
-	return s.haPort.GetAllEntities(ctx)
+func (s *BridgeService) SetIgnoredDomains(domains []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ignoredDomains = domains
+}
+
+func (s *BridgeService) extractEntities(states []model.HAEntityState) []ports.HomeAssistantEntity {
+	var entities []ports.HomeAssistantEntity
+	s.mu.RLock()
+	ignored := s.ignoredDomains
+	s.mu.RUnlock()
+	for _, s := range states {
+		if !s.IsSupported(ignored) {
+			continue
+		}
+
+		name := ""
+		if s.Attributes != nil {
+			if n, ok := s.Attributes["friendly_name"].(string); ok {
+				name = n
+			} else if n, ok := s.Attributes["name"].(string); ok {
+				name = n
+			}
+		}
+		if name == "" {
+			name = s.EntityID
+		}
+
+		entities = append(entities, ports.HomeAssistantEntity{
+			EntityID:     s.EntityID,
+			FriendlyName: name,
+		})
+	}
+	return entities
 }
 

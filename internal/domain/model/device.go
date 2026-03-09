@@ -1,5 +1,7 @@
 package model
 
+import "strings"
+
 type HueMetadata struct {
 	Type             string
 	ModelID          string
@@ -40,4 +42,13 @@ type HomeAssistantCommand struct {
 	Service string
 	Data    HAFields
 	Effect  string
+}
+
+func (s HAEntityState) IsSupported(ignoredDomains []string) bool {
+	for _, domain := range ignoredDomains {
+		if strings.HasPrefix(s.EntityID, domain) {
+			return false
+		}
+	}
+	return strings.Contains(s.EntityID, ".")
 }

@@ -6,13 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"hue-bridge-emulator/internal/domain/model"
-	"hue-bridge-emulator/internal/ports"
 	"log/slog"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
-	"time"
 )
 
 type Client struct {
@@ -20,9 +18,6 @@ type Client struct {
 	token      string
 	httpClient *http.Client
 	mu         sync.RWMutex
-
-	cacheStates []map[string]interface{}
-	cacheTime   time.Time
 }
 
 func NewClient() *Client {
@@ -45,49 +40,9 @@ func (c *Client) IsConfigured() bool {
 	return c.url != "" && c.token != ""
 }
 
-func (c *Client) GetAllEntities(ctx context.Context) ([]ports.HomeAssistantEntity, error) {
-	states, err := c.GetRawStates(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	var entities []ports.HomeAssistantEntity
-	for _, s := range states {
-		if !c.isSupported(s.EntityID) {
-			continue
-		}
-
-		name := ""
-		if s.Attributes != nil {
-			if n, ok := s.Attributes["friendly_name"].(string); ok {
-				name = n
-			} else if n, ok := s.Attributes["name"].(string); ok {
-				name = n
-			}
-		}
-		if name == "" {
-			name = s.EntityID
-		}
-
-		entities = append(entities, ports.HomeAssistantEntity{
-			EntityID:     s.EntityID,
-			FriendlyName: name,
-		})
-	}
-
-	return entities, nil
-}
 
 func (c *Client) GetRawStates(ctx context.Context) ([]model.HAEntityState, error) {
 	c.mu.RLock()
-	if time.Since(c.cacheTime) < 2*time.Second {
-		res := make([]model.HAEntityState, len(c.cacheStates))
-		for i, v := range c.cacheStates {
-			res[i] = c.toMapToStruct(v)
-		}
-		c.mu.RUnlock()
-		return res, nil
-	}
 	url := c.url
 	token := c.token
 	c.mu.RUnlock()
@@ -116,21 +71,6 @@ func (c *Client) GetRawStates(ctx context.Context) ([]model.HAEntityState, error
 	if err := json.NewDecoder(resp.Body).Decode(&states); err != nil {
 		return nil, err
 	}
-
-	// Optimization: strip large attributes to save RAM
-	for _, s := range states {
-		if attr, ok := s["attributes"].(map[string]interface{}); ok {
-			delete(attr, "entity_picture")
-			delete(attr, "entity_picture_local")
-			delete(attr, "source_list")
-			delete(attr, "sound_mode_list")
-		}
-	}
-
-	c.mu.Lock()
-	c.cacheStates = states
-	c.cacheTime = time.Now()
-	c.mu.Unlock()
 
 	res := make([]model.HAEntityState, len(states))
 	for i, v := range states {
@@ -230,12 +170,3 @@ func (c *Client) executeEffect(ctx context.Context, effect, urlBase, token strin
 	defer resp.Body.Close()
 }
 
-func (c *Client) isSupported(entityID string) bool {
-	ignoredDomains := []string{"zone.", "sun.", "weather."}
-	for _, domain := range ignoredDomains {
-		if strings.HasPrefix(entityID, domain) {
-			return false
-		}
-	}
-	return strings.Contains(entityID, ".")
-}

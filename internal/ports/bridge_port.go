@@ -3,6 +3,7 @@ package ports
 import (
 	"context"
 	"hue-bridge-emulator/internal/domain/model"
+	"hue-bridge-emulator/internal/domain/translator"
 )
 
 type HomeAssistantEntity struct {
@@ -10,15 +11,10 @@ type HomeAssistantEntity struct {
 	FriendlyName string `json:"friendly_name"`
 }
 
-type Translator interface {
-	ToHue(haState model.HAEntityState, vd *model.VirtualDevice) *model.DeviceState
-	ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) model.HomeAssistantCommand
-	GetMetadata() model.HueMetadata
-}
+type Translator = translator.Translator
 
-type TranslatorFactory interface {
-	GetTranslator(mappingType model.MappingType) Translator
-}
+type TranslatorFactory = translator.TranslatorFactory
+
 
 // HueEmulationPort defines the interface for Hue protocol emulation
 type HueEmulationPort interface {
@@ -36,16 +32,16 @@ type AdminPort interface {
 	TestDeviceAction(ctx context.Context, vd *model.VirtualDevice, state *model.DeviceState) error
 }
 
-// BridgePort combines emulation and administration (deprecated, use segregated interfaces)
-type BridgePort interface {
-	HueEmulationPort
-	AdminPort
-}
 
 type HomeAssistantPort interface {
 	GetRawStates(ctx context.Context) ([]model.HAEntityState, error)
-	GetAllEntities(ctx context.Context) ([]HomeAssistantEntity, error)
 	SetState(ctx context.Context, device *model.Device, cmd model.HomeAssistantCommand) error
+}
+
+// ReconfigurableHomeAssistantPort defines an interface for HomeAssistant ports that can be reconfigured at runtime
+type ReconfigurableHomeAssistantPort interface {
+	HomeAssistantPort
+	Configure(url, token string)
 }
 
 // Reconfigurable defines an interface for ports that can be reconfigured at runtime
