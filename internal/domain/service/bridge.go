@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 var RefreshInterval = 30 * time.Second
@@ -19,12 +21,14 @@ type BridgeService struct {
 	configRepo        ports.ConfigRepository
 	translatorFactory ports.TranslatorFactory
 	devices           map[string]*model.Device
+	sortedDevices     []*model.Device
 	mu                sync.RWMutex
-	refreshMu         sync.Mutex
 	lastRefresh       time.Time
 	initialized       bool
 	cachedHAStates    []model.HAEntityState
 	ignoredDomains    []string
+	refreshGroup      singleflight.Group
+	workerSem         chan struct{}
 }
 
 func NewBridgeService(haPort ports.ReconfigurableHomeAssistantPort, configRepo ports.ConfigRepository, translatorFactory ports.TranslatorFactory) *BridgeService {
@@ -33,6 +37,7 @@ func NewBridgeService(haPort ports.ReconfigurableHomeAssistantPort, configRepo p
 		configRepo:        configRepo,
 		translatorFactory: translatorFactory,
 		devices:           make(map[string]*model.Device),
+		workerSem:         make(chan struct{}, 10), // Limit to 10 concurrent HA service calls
 	}
 	return s
 }
@@ -66,72 +71,94 @@ func (s *BridgeService) TestDeviceAction(ctx context.Context, vd *model.VirtualD
 	t := s.translatorFactory.GetTranslator(vd.Type)
 	cmd := t.ToHA(state, vd)
 
-	go func() {
-		err := s.haPort.SetState(context.Background(), dummyDevice, cmd)
-		if err != nil {
-			slog.Error("Error setting HA test state", "error", err)
-		}
-	}()
+	select {
+	case s.workerSem <- struct{}{}:
+		go func() {
+			defer func() { <-s.workerSem }()
+			err := s.haPort.SetState(ctx, dummyDevice, cmd)
+			if err != nil {
+				slog.Error("Error setting HA test state", "error", err)
+			}
+		}()
+	default:
+		return fmt.Errorf("too many concurrent requests, please try again later")
+	}
 
 	return nil
 }
 
 func (s *BridgeService) RefreshDevices(ctx context.Context) error {
-	s.refreshMu.Lock()
-	defer s.refreshMu.Unlock()
+	_, err, _ := s.refreshGroup.Do("refresh", func() (interface{}, error) {
+		s.mu.RLock()
+		if time.Since(s.lastRefresh) < 2*time.Second && s.initialized {
+			s.mu.RUnlock()
+			return nil, nil
+		}
+		s.mu.RUnlock()
 
-	if time.Since(s.lastRefresh) < 2*time.Second && s.initialized {
-		return nil
-	}
+		slog.Info("Bridge: refreshing devices from HA")
 
-	slog.Info("Bridge: refreshing devices from HA")
-
-	cfg, err := s.configRepo.Get(ctx)
-	if err != nil {
-		return err
-	}
-
-	states, err := s.haPort.GetRawStates(ctx)
-	if err != nil {
-		slog.Error("Bridge: error getting HA states", "error", err)
-		return err
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.cachedHAStates = states
-
-	// Index HA states by entity_id
-	stateMap := make(map[string]model.HAEntityState)
-	for _, state := range states {
-		stateMap[state.EntityID] = state
-	}
-
-	newDevices := make(map[string]*model.Device)
-
-	for _, vd := range cfg.VirtualDevices {
-		state, exists := stateMap[vd.EntityID]
-		if !exists {
-			state = model.HAEntityState{EntityID: vd.EntityID, State: "unavailable"}
+		cfg, err := s.configRepo.Get(ctx)
+		if err != nil {
+			return nil, err
 		}
 
-		t := s.translatorFactory.GetTranslator(vd.Type)
-		hueState := t.ToHue(state, vd)
-
-		newDevices[vd.HueID] = &model.Device{
-			ID:            vd.HueID,
-			Name:          vd.Name,
-			Type:          vd.Type,
-			ExternalID:    vd.EntityID,
-			State:         hueState,
-			VirtualDevice: vd,
+		states, err := s.haPort.GetRawStates(ctx)
+		if err != nil {
+			slog.Error("Bridge: error getting HA states", "error", err)
+			return nil, err
 		}
-	}
-	s.devices = newDevices
-	s.lastRefresh = time.Now()
-	s.initialized = true
-	slog.Info("Bridge: refreshed devices", "count", len(s.devices))
-	return nil
+
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.cachedHAStates = states
+
+		// Index HA states by entity_id
+		stateMap := make(map[string]model.HAEntityState)
+		for _, state := range states {
+			stateMap[state.EntityID] = state
+		}
+
+		newDevices := make(map[string]*model.Device)
+
+		for _, vd := range cfg.VirtualDevices {
+			state, exists := stateMap[vd.EntityID]
+			if !exists {
+				state = model.HAEntityState{EntityID: vd.EntityID, State: "unavailable"}
+			}
+
+			t := s.translatorFactory.GetTranslator(vd.Type)
+			hueState := t.ToHue(state, vd)
+
+			newDevices[vd.HueID] = &model.Device{
+				ID:            vd.HueID,
+				Name:          vd.Name,
+				Type:          vd.Type,
+				ExternalID:    vd.EntityID,
+				State:         hueState,
+				VirtualDevice: vd,
+			}
+		}
+
+		// Pre-sort devices by HueID (numeric)
+		sorted := make([]*model.Device, 0, len(newDevices))
+		for _, d := range newDevices {
+			sorted = append(sorted, d)
+		}
+		sort.Slice(sorted, func(i, j int) bool {
+			idI, _ := strconv.Atoi(sorted[i].ID)
+			idJ, _ := strconv.Atoi(sorted[j].ID)
+			return idI < idJ
+		})
+
+		s.devices = newDevices
+		s.sortedDevices = sorted
+		s.lastRefresh = time.Now()
+		s.initialized = true
+		slog.Info("Bridge: refreshed devices", "count", len(s.devices))
+		return nil, nil
+	})
+	return err
 }
 
 func (s *BridgeService) GetDevices(ctx context.Context) ([]*model.Device, error) {
@@ -154,17 +181,10 @@ func (s *BridgeService) GetDevices(ctx context.Context) ([]*model.Device, error)
 
 // getDevicesLocked returns the devices list, must be called with at least a read lock
 func (s *BridgeService) getDevicesLocked() []*model.Device {
-	devices := make([]*model.Device, 0, len(s.devices))
-	for _, d := range s.devices {
+	devices := make([]*model.Device, 0, len(s.sortedDevices))
+	for _, d := range s.sortedDevices {
 		devices = append(devices, s.copyDevice(d))
 	}
-
-	// Stable sorting by HueID (numeric)
-	sort.Slice(devices, func(i, j int) bool {
-		idI, _ := strconv.Atoi(devices[i].ID)
-		idJ, _ := strconv.Atoi(devices[j].ID)
-		return idI < idJ
-	})
 	return devices
 }
 
@@ -227,12 +247,18 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, stateU
 	cmd := t.ToHA(&tmpState, device.VirtualDevice)
 	s.mu.Unlock()
 
-	go func() {
-		err := s.haPort.SetState(context.Background(), deviceCopy, cmd)
-		if err != nil {
-			slog.Error("Error setting HA state", "error", err)
-		}
-	}()
+	select {
+	case s.workerSem <- struct{}{}:
+		go func() {
+			defer func() { <-s.workerSem }()
+			err := s.haPort.SetState(ctx, deviceCopy, cmd)
+			if err != nil {
+				slog.Error("Error setting HA state", "error", err)
+			}
+		}()
+	default:
+		return fmt.Errorf("too many concurrent requests, please try again later")
+	}
 
 	return nil
 }
@@ -264,9 +290,9 @@ func (s *BridgeService) UpdateConfig(ctx context.Context, cfg *model.Config) err
 	s.haPort.Configure(cfg.HassURL, cfg.HassToken)
 
 	// Force refresh
-	s.refreshMu.Lock()
+	s.mu.Lock()
 	s.lastRefresh = time.Now().Add(-5 * time.Second) // Ensure we can refresh
-	s.refreshMu.Unlock()
+	s.mu.Unlock()
 
 	// We don't want to fail the whole update if Home Assistant is currently unreachable
 	_ = s.RefreshDevices(ctx)

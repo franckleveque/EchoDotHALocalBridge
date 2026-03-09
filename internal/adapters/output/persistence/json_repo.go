@@ -2,8 +2,14 @@ package persistence
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"hue-bridge-emulator/internal/domain/model"
+	"io"
 	"os"
 	"sync"
 )
@@ -11,6 +17,8 @@ import (
 type JSONConfigRepository struct {
 	filepath string
 	mu       sync.RWMutex
+	cache    *model.Config
+	key      []byte
 }
 
 // Internal structure for migration
@@ -39,12 +47,26 @@ type legacyCustomFormula struct {
 }
 
 func NewJSONConfigRepository(filepath string) *JSONConfigRepository {
-	return &JSONConfigRepository{filepath: filepath}
+	// Simple static key for token encryption. In a real scenario, this could be from an env var.
+	key := []byte("a-very-secret-key-32-chars-long!!")
+	return &JSONConfigRepository{filepath: filepath, key: key}
 }
 
 func (r *JSONConfigRepository) Get(ctx context.Context) (*model.Config, error) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
+	if r.cache != nil {
+		defer r.mu.RUnlock()
+		return r.cache, nil
+	}
+	r.mu.RUnlock()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Double check cache after acquiring write lock
+	if r.cache != nil {
+		return r.cache, nil
+	}
 
 	data, err := os.ReadFile(r.filepath)
 	if err != nil {
@@ -63,9 +85,29 @@ func (r *JSONConfigRepository) Get(ctx context.Context) (*model.Config, error) {
 
 	// Migration check: if virtual_devices is empty but there's a file, check for old format
 	if len(cfg.VirtualDevices) == 0 {
-		return r.migrate(data)
+		migrated, err := r.migrate(data)
+		if err == nil {
+			if migrated.HassToken != "" {
+				decrypted, err := r.decrypt(migrated.HassToken)
+				if err == nil {
+					migrated.HassToken = decrypted
+				}
+			}
+			r.cache = migrated
+		}
+		return migrated, err
 	}
 
+	if cfg.HassToken != "" {
+		decrypted, err := r.decrypt(cfg.HassToken)
+		if err != nil {
+			// If decryption fails, assume it's already plaintext (e.g. first run after update)
+		} else {
+			cfg.HassToken = decrypted
+		}
+	}
+
+	r.cache = &cfg
 	return &cfg, nil
 }
 
@@ -119,10 +161,75 @@ func (r *JSONConfigRepository) Save(ctx context.Context, config *model.Config) e
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	data, err := json.MarshalIndent(config, "", "  ")
+	// Clone config to encrypt token for storage without affecting memory state
+	storageConfig := *config
+	if storageConfig.HassToken != "" {
+		encrypted, err := r.encrypt(storageConfig.HassToken)
+		if err != nil {
+			return err
+		}
+		storageConfig.HassToken = encrypted
+	}
+
+	data, err := json.MarshalIndent(storageConfig, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(r.filepath, data, 0600)
+	if err := os.WriteFile(r.filepath, data, 0600); err != nil {
+		return err
+	}
+
+	r.cache = config
+	return nil
+}
+
+func (r *JSONConfigRepository) encrypt(plaintext string) (string, error) {
+	block, err := aes.NewCipher(r.key)
+	if err != nil {
+		return "", err
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err = io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", err
+	}
+
+	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	return base64.StdEncoding.EncodeToString(ciphertext), nil
+}
+
+func (r *JSONConfigRepository) decrypt(cryptoText string) (string, error) {
+	ciphertext, err := base64.StdEncoding.DecodeString(cryptoText)
+	if err != nil {
+		return "", err
+	}
+
+	block, err := aes.NewCipher(r.key)
+	if err != nil {
+		return "", err
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+
+	nonceSize := gcm.NonceSize()
+	if len(ciphertext) < nonceSize {
+		return "", fmt.Errorf("ciphertext too short")
+	}
+
+	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return "", err
+	}
+
+	return string(plaintext), nil
 }

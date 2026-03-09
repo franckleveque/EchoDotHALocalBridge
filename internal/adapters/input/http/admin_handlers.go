@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"hue-bridge-emulator/internal/domain/model"
 	"net/http"
+	"strings"
+	"time"
 )
 
 func (s *Server) handleAdminSetup(w http.ResponseWriter, r *http.Request) {
@@ -12,6 +14,30 @@ func (s *Server) handleAdminSetup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Forbidden - Setup already completed", http.StatusForbidden)
 		return
 	}
+
+	// Rate limiting for setup
+	ip := r.RemoteAddr
+	if idx := strings.LastIndex(ip, ":"); idx != -1 {
+		ip = ip[:idx]
+	}
+	s.limiterMu.Lock()
+	if last, ok := s.setupLimiter[ip]; ok && time.Since(last) < 2*time.Second {
+		s.limiterMu.Unlock()
+		http.Error(w, "Too many requests", http.StatusTooManyRequests)
+		return
+	}
+
+	// Basic cleanup: if map gets too large, clear it
+	if len(s.setupLimiter) > 1000 {
+		for k, v := range s.setupLimiter {
+			if time.Since(v) > 10*time.Minute {
+				delete(s.setupLimiter, k)
+			}
+		}
+	}
+
+	s.setupLimiter[ip] = time.Now()
+	s.limiterMu.Unlock()
 
 	if r.Method == "GET" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

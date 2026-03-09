@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/amimof/huego"
@@ -21,14 +22,17 @@ type Server struct {
 	admin       ports.AdminPort
 	authService ports.AuthService
 	ip          string
+	setupLimiter map[string]time.Time
+	limiterMu    sync.Mutex
 }
 
 func NewServer(hue ports.HueEmulationPort, admin ports.AdminPort, authService ports.AuthService, ip string) *Server {
 	return &Server{
-		hue:         hue,
-		admin:       admin,
-		authService: authService,
-		ip:          ip,
+		hue:          hue,
+		admin:        admin,
+		authService:  authService,
+		ip:           ip,
+		setupLimiter: make(map[string]time.Time),
 	}
 }
 

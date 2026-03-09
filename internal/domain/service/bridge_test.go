@@ -544,6 +544,50 @@ func TestBridgeService_GetRawStates(t *testing.T) {
 	assert.Equal(t, states, res)
 }
 
+func TestBridgeService_WorkerPoolLimit(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockRepo := new(MockConfigRepo)
+	mockTF := new(MockTranslatorFactory)
+	mockT := new(MockTranslator)
+
+	s := NewBridgeService(mockHA, mockRepo, mockTF)
+
+	// Setup a device for UpdateDeviceState
+	vd := &model.VirtualDevice{HueID: "1", EntityID: "light.test", Type: model.MappingTypeLight}
+	cfg := &model.Config{VirtualDevices: []*model.VirtualDevice{vd}}
+	mockRepo.On("Get", mock.Anything).Return(cfg, nil)
+	mockHA.On("GetRawStates", mock.Anything).Return([]model.HAEntityState{{EntityID: "light.test", State: "on"}}, nil)
+	mockTF.On("GetTranslator", model.MappingTypeLight).Return(mockT)
+	mockT.On("ToHue", mock.Anything, mock.Anything).Return(&model.DeviceState{On: true})
+	mockT.On("ToHA", mock.Anything, mock.Anything).Return(model.HomeAssistantCommand{Service: "turn_off"})
+	_, _ = s.GetDevices(context.Background())
+
+	// Fill the semaphore
+	for i := 0; i < 10; i++ {
+		s.workerSem <- struct{}{}
+	}
+
+	// Test UpdateDeviceState limit
+	err := s.UpdateDeviceState(context.Background(), "1", &model.DeviceState{On: false})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "too many concurrent requests")
+
+	// Test TestDeviceAction limit
+	err = s.TestDeviceAction(context.Background(), vd, &model.DeviceState{On: true})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "too many concurrent requests")
+
+	// Drain the semaphore
+	for i := 0; i < 10; i++ {
+		<-s.workerSem
+	}
+
+	// Should work again
+	mockHA.On("SetState", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	err = s.UpdateDeviceState(context.Background(), "1", &model.DeviceState{On: false})
+	assert.NoError(t, err)
+}
+
 func TestBridgeService_RefreshCooldown(t *testing.T) {
 	mockHA := new(MockHAPort)
 	mockRepo := new(MockConfigRepo)

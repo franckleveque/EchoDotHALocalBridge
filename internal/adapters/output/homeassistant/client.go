@@ -67,29 +67,26 @@ func (c *Client) GetRawStates(ctx context.Context) ([]model.HAEntityState, error
 		return nil, fmt.Errorf("HA API error: %d", resp.StatusCode)
 	}
 
-	var states []map[string]interface{}
+	type haState struct {
+		EntityID   string         `json:"entity_id"`
+		State      string         `json:"state"`
+		Attributes model.HAFields `json:"attributes"`
+	}
+
+	var states []haState
 	if err := json.NewDecoder(resp.Body).Decode(&states); err != nil {
 		return nil, err
 	}
 
 	res := make([]model.HAEntityState, len(states))
 	for i, v := range states {
-		res[i] = c.toMapToStruct(v)
-	}
-	return res, nil
-}
-
-func (c *Client) toMapToStruct(m map[string]interface{}) model.HAEntityState {
-	s := model.HAEntityState{}
-	s.EntityID, _ = m["entity_id"].(string)
-	s.State, _ = m["state"].(string)
-	if attr, ok := m["attributes"].(map[string]interface{}); ok {
-		s.Attributes = make(model.HAFields)
-		for k, v := range attr {
-			s.Attributes[k] = v
+		res[i] = model.HAEntityState{
+			EntityID:   v.EntityID,
+			State:      v.State,
+			Attributes: v.Attributes,
 		}
 	}
-	return s
+	return res, nil
 }
 
 func (c *Client) SetState(ctx context.Context, device *model.Device, cmd model.HomeAssistantCommand) error {
