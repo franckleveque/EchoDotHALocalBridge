@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"hue-bridge-emulator/internal/domain/model"
@@ -107,7 +108,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		err := s.admin.UpdateConfig(r.Context(), &newCfg)
+		err := s.admin.UpdateConfig(context.Background(), &newCfg)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

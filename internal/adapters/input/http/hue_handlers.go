@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"hue-bridge-emulator/internal/domain/model"
@@ -153,7 +154,7 @@ func (s *Server) handleSetLightState(w http.ResponseWriter, r *http.Request, id 
 	}
 	// TODO: handle other fields if needed, but for now these are the main ones
 
-	err := s.hue.UpdateDeviceState(r.Context(), id, stateUpdate)
+	err := s.hue.UpdateDeviceState(context.Background(), id, stateUpdate)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

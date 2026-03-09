@@ -48,7 +48,7 @@ type legacyCustomFormula struct {
 
 func NewJSONConfigRepository(filepath string) *JSONConfigRepository {
 	// Simple static key for token encryption. In a real scenario, this could be from an env var.
-	key := []byte("a-very-secret-key-32-chars-long!!")
+	key := []byte("a-very-secret-key-32-chars-long!")
 	return &JSONConfigRepository{filepath: filepath, key: key}
 }
 
@@ -81,7 +81,6 @@ func (r *JSONConfigRepository) Get(ctx context.Context) (*model.Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
-
 
 	// Migration check: if virtual_devices is empty but there's a file, check for old format
 	if len(cfg.VirtualDevices) == 0 {
@@ -163,6 +162,14 @@ func (r *JSONConfigRepository) Save(ctx context.Context, config *model.Config) e
 
 	// Clone config to encrypt token for storage without affecting memory state
 	storageConfig := *config
+	if config.VirtualDevices != nil {
+		storageConfig.VirtualDevices = make([]*model.VirtualDevice, len(config.VirtualDevices))
+		for i, vd := range config.VirtualDevices {
+			vdCopy := *vd
+			storageConfig.VirtualDevices[i] = &vdCopy
+		}
+	}
+
 	if storageConfig.HassToken != "" {
 		encrypted, err := r.encrypt(storageConfig.HassToken)
 		if err != nil {
