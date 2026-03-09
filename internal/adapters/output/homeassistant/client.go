@@ -31,6 +31,7 @@ func NewClient() *Client {
 	}
 }
 
+
 func (c *Client) Configure(url, token string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -52,25 +53,24 @@ func (c *Client) GetAllEntities(ctx context.Context) ([]ports.HomeAssistantEntit
 
 	var entities []ports.HomeAssistantEntity
 	for _, s := range states {
-		entityID, _ := s["entity_id"].(string)
-		if !c.isSupported(entityID) {
+		if !c.isSupported(s.EntityID) {
 			continue
 		}
 
-		name, _ := s["name"].(string)
-		attributes, _ := s["attributes"].(map[string]interface{})
-		if name == "" && attributes != nil {
-			name, _ = attributes["friendly_name"].(string)
-			if name == "" {
-				name, _ = attributes["name"].(string)
+		name := ""
+		if s.Attributes != nil {
+			if n, ok := s.Attributes["friendly_name"].(string); ok {
+				name = n
+			} else if n, ok := s.Attributes["name"].(string); ok {
+				name = n
 			}
 		}
 		if name == "" {
-			name = entityID
+			name = s.EntityID
 		}
 
 		entities = append(entities, ports.HomeAssistantEntity{
-			EntityID:     entityID,
+			EntityID:     s.EntityID,
 			FriendlyName: name,
 		})
 	}
@@ -78,10 +78,13 @@ func (c *Client) GetAllEntities(ctx context.Context) ([]ports.HomeAssistantEntit
 	return entities, nil
 }
 
-func (c *Client) GetRawStates(ctx context.Context) ([]map[string]interface{}, error) {
+func (c *Client) GetRawStates(ctx context.Context) ([]model.HAEntityState, error) {
 	c.mu.RLock()
 	if time.Since(c.cacheTime) < 2*time.Second {
-		res := c.cacheStates
+		res := make([]model.HAEntityState, len(c.cacheStates))
+		for i, v := range c.cacheStates {
+			res[i] = c.toMapToStruct(v)
+		}
 		c.mu.RUnlock()
 		return res, nil
 	}
@@ -129,10 +132,27 @@ func (c *Client) GetRawStates(ctx context.Context) ([]map[string]interface{}, er
 	c.cacheTime = time.Now()
 	c.mu.Unlock()
 
-	return states, nil
+	res := make([]model.HAEntityState, len(states))
+	for i, v := range states {
+		res[i] = c.toMapToStruct(v)
+	}
+	return res, nil
 }
 
-func (c *Client) SetState(ctx context.Context, device *model.Device, params map[string]interface{}) error {
+func (c *Client) toMapToStruct(m map[string]interface{}) model.HAEntityState {
+	s := model.HAEntityState{}
+	s.EntityID, _ = m["entity_id"].(string)
+	s.State, _ = m["state"].(string)
+	if attr, ok := m["attributes"].(map[string]interface{}); ok {
+		s.Attributes = make(model.HAFields)
+		for k, v := range attr {
+			s.Attributes[k] = v
+		}
+	}
+	return s
+}
+
+func (c *Client) SetState(ctx context.Context, device *model.Device, cmd model.HomeAssistantCommand) error {
 	c.mu.RLock()
 	urlBase := c.url
 	token := c.token
@@ -142,28 +162,16 @@ func (c *Client) SetState(ctx context.Context, device *model.Device, params map[
 		return fmt.Errorf("Home Assistant not configured")
 	}
 
-	// Safely retrieve service name
-	serviceRaw, ok := params["service"]
-	if !ok {
-		return fmt.Errorf("no service specified for device %s", device.ExternalID)
-	}
-	service, ok := serviceRaw.(string)
-	if !ok || service == "" {
-		return fmt.Errorf("invalid service specified for device %s", device.ExternalID)
-	}
-
 	domain := strings.Split(device.ExternalID, ".")[0]
-	serviceParts := strings.Split(service, ".")
+	serviceParts := strings.Split(cmd.Service, ".")
+	service := cmd.Service
 	if len(serviceParts) == 2 {
 		domain = serviceParts[0]
 		service = serviceParts[1]
 	}
 
-	payload := make(map[string]interface{})
-	for k, v := range params {
-		if k == "effect" || k == "service" || k == "__is_on" {
-			continue
-		}
+	payload := make(map[string]any)
+	for k, v := range cmd.Data {
 		payload[k] = v
 	}
 
@@ -199,8 +207,8 @@ func (c *Client) SetState(ctx context.Context, device *model.Device, params map[
 	}
 
 	// Handle custom effects if provided
-	if effect, ok := params["effect"].(string); ok && effect != "" {
-		c.executeEffect(ctx, effect, urlBase, token)
+	if cmd.Effect != "" {
+		c.executeEffect(ctx, cmd.Effect, urlBase, token)
 	}
 
 	return nil

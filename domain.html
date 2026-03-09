@@ -1,0 +1,872 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>service: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+
+				<option value="file0">hue-bridge-emulator/internal/domain/service/auth.go (100.0%)</option>
+
+				<option value="file1">hue-bridge-emulator/internal/domain/service/bridge.go (99.3%)</option>
+
+				<option value="file2">hue-bridge-emulator/internal/domain/translator/climate.go (100.0%)</option>
+
+				<option value="file3">hue-bridge-emulator/internal/domain/translator/cover.go (100.0%)</option>
+
+				<option value="file4">hue-bridge-emulator/internal/domain/translator/custom.go (100.0%)</option>
+
+				<option value="file5">hue-bridge-emulator/internal/domain/translator/factory.go (100.0%)</option>
+
+				<option value="file6">hue-bridge-emulator/internal/domain/translator/light.go (100.0%)</option>
+
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+
+			</div>
+		</div>
+		<div id="content">
+
+		<pre class="file" id="file0" style="display: none">package service
+
+import (
+        "context"
+        "crypto/subtle"
+        "hue-bridge-emulator/internal/domain/model"
+        "hue-bridge-emulator/internal/ports"
+
+        "golang.org/x/crypto/bcrypt"
+)
+
+type AuthService struct {
+        authRepo ports.AuthPort
+}
+
+func NewAuthService(authRepo ports.AuthPort) *AuthService <span class="cov8" title="1">{
+        return &amp;AuthService{authRepo: authRepo}
+}</span>
+
+func (s *AuthService) Verify(ctx context.Context, username, password string) (bool, error) <span class="cov8" title="1">{
+        if !s.authRepo.Exists() </span><span class="cov8" title="1">{
+                return false, nil
+        }</span>
+
+        <span class="cov8" title="1">config, err := s.authRepo.Get(ctx)
+        if err != nil </span><span class="cov8" title="1">{
+                return false, err
+        }</span>
+        <span class="cov8" title="1">if config == nil </span><span class="cov8" title="1">{
+                return false, nil
+        }</span>
+
+        <span class="cov8" title="1">userMatch := subtle.ConstantTimeCompare([]byte(username), []byte(config.Username)) == 1
+        if bcrypt.CompareHashAndPassword([]byte(config.Password), []byte(password)) != nil </span><span class="cov8" title="1">{
+                return false, nil
+        }</span>
+
+        <span class="cov8" title="1">return userMatch, nil</span>
+}
+
+func (s *AuthService) CreateCredentials(ctx context.Context, username, password string) error <span class="cov8" title="1">{
+        hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+        if err != nil </span><span class="cov8" title="1">{
+                return err
+        }</span>
+
+        <span class="cov8" title="1">auth := &amp;model.AuthConfig{
+                Username: username,
+                Password: string(hashedPassword),
+        }
+
+        return s.authRepo.Save(ctx, auth)</span>
+}
+
+func (s *AuthService) Exists() bool <span class="cov8" title="1">{
+        return s.authRepo.Exists()
+}</span>
+</pre>
+
+		<pre class="file" id="file1" style="display: none">package service
+
+import (
+        "context"
+        "fmt"
+        "log/slog"
+        "hue-bridge-emulator/internal/domain/model"
+        "hue-bridge-emulator/internal/ports"
+        "sort"
+        "strconv"
+        "sync"
+        "time"
+)
+
+var RefreshInterval = 30 * time.Second
+
+type BridgeService struct {
+        haPort            ports.HomeAssistantPort
+        configRepo        ports.ConfigRepository
+        translatorFactory ports.TranslatorFactory
+        devices           map[string]*model.Device
+        mu                sync.RWMutex
+        refreshMu         sync.Mutex
+        lastRefresh       time.Time
+        initialized       bool
+}
+
+func NewBridgeService(haPort ports.HomeAssistantPort, configRepo ports.ConfigRepository, translatorFactory ports.TranslatorFactory) *BridgeService <span class="cov8" title="1">{
+        s := &amp;BridgeService{
+                haPort:            haPort,
+                configRepo:        configRepo,
+                translatorFactory: translatorFactory,
+                devices:           make(map[string]*model.Device),
+        }
+        return s
+}</span>
+
+func (s *BridgeService) Start(ctx context.Context) <span class="cov8" title="1">{
+        ticker := time.NewTicker(RefreshInterval)
+        go func() </span><span class="cov8" title="1">{
+                for </span><span class="cov8" title="1">{
+                        select </span>{
+                        case &lt;-ticker.C:<span class="cov8" title="1">
+                                s.RefreshDevices(ctx)</span>
+                        case &lt;-ctx.Done():<span class="cov8" title="1">
+                                ticker.Stop()
+                                return</span>
+                        }
+                }
+        }()
+}
+
+func (s *BridgeService) TestDeviceAction(ctx context.Context, vd *model.VirtualDevice, state *model.DeviceState) error <span class="cov8" title="1">{
+        // Create a dummy device for SetState
+        dummyDevice := &amp;model.Device{
+                ID:            "test",
+                Name:          vd.Name,
+                Type:          vd.Type,
+                ExternalID:    vd.EntityID,
+                State:         state,
+                VirtualDevice: vd,
+        }
+
+        t := s.translatorFactory.GetTranslator(vd.Type)
+        cmd := t.ToHA(state, vd)
+
+        go func() </span><span class="cov8" title="1">{
+                err := s.haPort.SetState(context.Background(), dummyDevice, cmd)
+                if err != nil </span><span class="cov8" title="1">{
+                        slog.Error("Error setting HA test state", "error", err)
+                }</span>
+        }()
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+func (s *BridgeService) RefreshDevices(ctx context.Context) error <span class="cov8" title="1">{
+        s.refreshMu.Lock()
+        defer s.refreshMu.Unlock()
+
+        if time.Since(s.lastRefresh) &lt; 2*time.Second &amp;&amp; s.initialized </span><span class="cov8" title="1">{
+                return nil
+        }</span>
+
+        <span class="cov8" title="1">if !s.haPort.IsConfigured() </span><span class="cov8" title="1">{
+                return nil
+        }</span>
+
+        <span class="cov8" title="1">slog.Info("Bridge: refreshing devices from HA")
+
+        cfg, err := s.configRepo.Get(ctx)
+        if err != nil </span><span class="cov8" title="1">{
+                return err
+        }</span>
+
+        <span class="cov8" title="1">states, err := s.haPort.GetRawStates(ctx)
+        if err != nil </span><span class="cov8" title="1">{
+                slog.Error("Bridge: error getting HA states", "error", err)
+                return err
+        }</span>
+
+        // Index HA states by entity_id
+        <span class="cov8" title="1">stateMap := make(map[string]map[string]interface{})
+        for _, rawState := range states </span><span class="cov8" title="1">{
+                state, ok := rawState.(map[string]interface{})
+                if !ok </span><span class="cov0" title="0">{
+                        continue</span>
+                }
+                <span class="cov8" title="1">if eid, ok := state["entity_id"].(string); ok </span><span class="cov8" title="1">{
+                        stateMap[eid] = state
+                }</span>
+        }
+
+        <span class="cov8" title="1">s.mu.Lock()
+        defer s.mu.Unlock()
+        newDevices := make(map[string]*model.Device)
+
+        for _, vd := range cfg.VirtualDevices </span><span class="cov8" title="1">{
+                state := stateMap[vd.EntityID]
+                if state == nil </span><span class="cov8" title="1">{
+                        state = map[string]interface{}{"entity_id": vd.EntityID, "state": "unavailable"}
+                }</span>
+
+                <span class="cov8" title="1">t := s.translatorFactory.GetTranslator(vd.Type)
+                hueState := t.ToHue(state, vd)
+
+                newDevices[vd.HueID] = &amp;model.Device{
+                        ID:            vd.HueID,
+                        Name:          vd.Name,
+                        Type:          vd.Type,
+                        ExternalID:    vd.EntityID,
+                        State:         hueState,
+                        VirtualDevice: vd,
+                }</span>
+        }
+        <span class="cov8" title="1">s.devices = newDevices
+        s.lastRefresh = time.Now()
+        s.initialized = true
+        slog.Info("Bridge: refreshed devices", "count", len(s.devices))
+        return nil</span>
+}
+
+func (s *BridgeService) GetDevices(ctx context.Context) ([]*model.Device, error) <span class="cov8" title="1">{
+        s.mu.RLock()
+        if s.initialized </span><span class="cov8" title="1">{
+                devices := s.getDevicesLocked()
+                s.mu.RUnlock()
+                return devices, nil
+        }</span>
+        <span class="cov8" title="1">s.mu.RUnlock()
+
+        if err := s.RefreshDevices(ctx); err != nil </span><span class="cov8" title="1">{
+                return nil, err
+        }</span>
+
+        <span class="cov8" title="1">s.mu.RLock()
+        defer s.mu.RUnlock()
+        return s.getDevicesLocked(), nil</span>
+}
+
+// getDevicesLocked returns the devices list, must be called with at least a read lock
+func (s *BridgeService) getDevicesLocked() []*model.Device <span class="cov8" title="1">{
+        devices := make([]*model.Device, 0, len(s.devices))
+        for _, d := range s.devices </span><span class="cov8" title="1">{
+                devices = append(devices, s.copyDevice(d))
+        }</span>
+
+        // Stable sorting by HueID (numeric)
+        <span class="cov8" title="1">sort.Slice(devices, func(i, j int) bool </span><span class="cov8" title="1">{
+                idI, _ := strconv.Atoi(devices[i].ID)
+                idJ, _ := strconv.Atoi(devices[j].ID)
+                return idI &lt; idJ
+        }</span>)
+        <span class="cov8" title="1">return devices</span>
+}
+
+func (s *BridgeService) GetDevice(ctx context.Context, id string) (*model.Device, error) <span class="cov8" title="1">{
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+        d, ok := s.devices[id]
+        if !ok </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("device %s not found", id)
+        }</span>
+        <span class="cov8" title="1">return s.copyDevice(d), nil</span>
+}
+
+func (s *BridgeService) GetDeviceMetadata(deviceType model.MappingType) model.HueMetadata <span class="cov8" title="1">{
+        return s.translatorFactory.GetTranslator(deviceType).GetMetadata()
+}</span>
+
+func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, stateUpdate *model.DeviceState) error <span class="cov8" title="1">{
+        s.mu.Lock()
+        device, ok := s.devices[id]
+        if !ok </span><span class="cov8" title="1">{
+                s.mu.Unlock()
+                return fmt.Errorf("device %s not found", id)
+        }</span>
+
+        // Create a temporary state merged with the current state to handle partial updates
+        <span class="cov8" title="1">tmpState := *device.State
+        if stateUpdate.UpdatedByBri </span><span class="cov8" title="1">{
+                tmpState.Bri = stateUpdate.Bri
+                tmpState.UpdatedByBri = true
+                tmpState.On = true
+        }</span> else<span class="cov8" title="1"> {
+                tmpState.On = stateUpdate.On
+        }</span>
+
+        // Check NoOp before starting goroutine
+        <span class="cov8" title="1">vd := device.VirtualDevice
+        if vd.ActionConfig != nil </span><span class="cov8" title="1">{
+                if tmpState.On &amp;&amp; vd.ActionConfig.NoOpOn </span><span class="cov8" title="1">{
+                        s.mu.Unlock()
+                        return nil
+                }</span>
+                <span class="cov8" title="1">if !tmpState.On &amp;&amp; vd.ActionConfig.NoOpOff </span><span class="cov8" title="1">{
+                        s.mu.Unlock()
+                        return nil
+                }</span>
+        }
+
+        // Optimistic update under lock
+        <span class="cov8" title="1">if stateUpdate.UpdatedByBri </span><span class="cov8" title="1">{
+                device.State.Bri = stateUpdate.Bri
+                device.State.UpdatedByBri = true
+                device.State.On = true
+        }</span> else<span class="cov8" title="1"> {
+                device.State.On = stateUpdate.On
+        }</span>
+
+        <span class="cov8" title="1">deviceCopy := s.copyDevice(device)
+        t := s.translatorFactory.GetTranslator(device.Type)
+        cmd := t.ToHA(&amp;tmpState, device.VirtualDevice)
+        s.mu.Unlock()
+
+        go func() </span><span class="cov8" title="1">{
+                err := s.haPort.SetState(context.Background(), deviceCopy, cmd)
+                if err != nil </span><span class="cov8" title="1">{
+                        slog.Error("Error setting HA state", "error", err)
+                }</span>
+        }()
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+func (s *BridgeService) copyDevice(d *model.Device) *model.Device <span class="cov8" title="1">{
+        dCopy := *d
+        if d.State != nil </span><span class="cov8" title="1">{
+                stateCopy := *d.State
+                if d.State.Xy != nil </span><span class="cov8" title="1">{
+                        stateCopy.Xy = make([]float32, len(d.State.Xy))
+                        copy(stateCopy.Xy, d.State.Xy)
+                }</span>
+                <span class="cov8" title="1">dCopy.State = &amp;stateCopy</span>
+        }
+        <span class="cov8" title="1">return &amp;dCopy</span>
+}
+
+func (s *BridgeService) GetConfig(ctx context.Context) (*model.Config, error) <span class="cov8" title="1">{
+        return s.configRepo.Get(ctx)
+}</span>
+
+func (s *BridgeService) UpdateConfig(ctx context.Context, cfg *model.Config) error <span class="cov8" title="1">{
+        // Ensure stable Hue IDs
+        maxID := 0
+        for _, vd := range cfg.VirtualDevices </span><span class="cov8" title="1">{
+                if vd.HueID != "" </span><span class="cov8" title="1">{
+                        if id, err := strconv.Atoi(vd.HueID); err == nil &amp;&amp; id &gt; maxID </span><span class="cov8" title="1">{
+                                maxID = id
+                        }</span>
+                }
+        }
+
+        <span class="cov8" title="1">for _, vd := range cfg.VirtualDevices </span><span class="cov8" title="1">{
+                if vd.HueID == "" </span><span class="cov8" title="1">{
+                        maxID++
+                        vd.HueID = strconv.Itoa(maxID)
+                }</span>
+        }
+
+        <span class="cov8" title="1">err := s.configRepo.Save(ctx, cfg)
+        if err != nil </span><span class="cov8" title="1">{
+                return err
+        }</span>
+        <span class="cov8" title="1">s.haPort.Configure(cfg.HassURL, cfg.HassToken)
+
+        // Force refresh
+        s.refreshMu.Lock()
+        s.lastRefresh = time.Now().Add(-5 * time.Second) // Ensure we can refresh
+        s.refreshMu.Unlock()
+
+        // We don't want to fail the whole update if Home Assistant is currently unreachable
+        _ = s.RefreshDevices(ctx)
+
+        return nil</span>
+}
+
+func (s *BridgeService) GetAllEntities(ctx context.Context) ([]ports.HomeAssistantEntity, error) <span class="cov8" title="1">{
+        return s.haPort.GetAllEntities(ctx)
+}</span>
+
+</pre>
+
+		<pre class="file" id="file2" style="display: none">package translator
+
+import (
+        "hue-bridge-emulator/internal/domain/model"
+)
+
+type ClimateStrategy struct{}
+
+func (s *ClimateStrategy) ToHue(haState any, vd *model.VirtualDevice) *model.DeviceState <span class="cov8" title="1">{
+        haMap, _ := haState.(map[string]interface{})
+        state := &amp;model.DeviceState{}
+        state.On = true
+        if attr, ok := haMap["attributes"].(map[string]interface{}); ok </span><span class="cov8" title="1">{
+                if temp, ok := attr["temperature"].(float64); ok </span><span class="cov8" title="1">{
+                        // Map 7-28°C to 0-254
+                        if temp &lt; 7 </span><span class="cov8" title="1">{
+                                temp = 7
+                        }</span>
+                        <span class="cov8" title="1">if temp &gt; 28 </span><span class="cov8" title="1">{
+                                temp = 28
+                        }</span>
+                        <span class="cov8" title="1">state.Bri = uint8((temp - 7) * 254 / (28 - 7))</span>
+                }
+        }
+        <span class="cov8" title="1">state.Reachable = true
+        return state</span>
+}
+
+func (s *ClimateStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) model.HomeAssistantCommand <span class="cov8" title="1">{
+        service := "set_temperature"
+        params := make(map[string]interface{})
+        temp := 7.0 + (float64(hueState.Bri) * (28.0 - 7.0) / 254.0)
+        params["temperature"] = temp
+
+        if vd.ActionConfig != nil </span><span class="cov8" title="1">{
+                if hueState.On </span><span class="cov8" title="1">{
+                        if vd.ActionConfig.OnService != "" </span><span class="cov8" title="1">{
+                                service = vd.ActionConfig.OnService
+                        }</span>
+                        <span class="cov8" title="1">if vd.ActionConfig.OnEffect != "" </span><span class="cov8" title="1">{
+                                params["effect"] = vd.ActionConfig.OnEffect
+                        }</span>
+                        <span class="cov8" title="1">for k, v := range vd.ActionConfig.OnPayload </span><span class="cov8" title="1">{
+                                params[k] = v
+                        }</span>
+                } else<span class="cov8" title="1"> {
+                        if vd.ActionConfig.OffService != "" </span><span class="cov8" title="1">{
+                                service = vd.ActionConfig.OffService
+                        }</span>
+                        <span class="cov8" title="1">if vd.ActionConfig.OffEffect != "" </span><span class="cov8" title="1">{
+                                params["effect"] = vd.ActionConfig.OffEffect
+                        }</span>
+                        <span class="cov8" title="1">for k, v := range vd.ActionConfig.OffPayload </span><span class="cov8" title="1">{
+                                params[k] = v
+                        }</span>
+                }
+        }
+
+        <span class="cov8" title="1">return model.HomeAssistantCommand{
+                Service: service,
+                Data:    params,
+        }</span>
+}
+
+func (s *ClimateStrategy) GetMetadata() model.HueMetadata <span class="cov8" title="1">{
+        return model.HueMetadata{
+                Type:             "Dimmable light",
+                ModelID:          "LWB004",
+                ManufacturerName: "Philips",
+        }
+}</span>
+</pre>
+
+		<pre class="file" id="file3" style="display: none">package translator
+
+import (
+        "hue-bridge-emulator/internal/domain/model"
+)
+
+type CoverStrategy struct{}
+
+func (s *CoverStrategy) ToHue(haState any, vd *model.VirtualDevice) *model.DeviceState <span class="cov8" title="1">{
+        haMap, _ := haState.(map[string]interface{})
+        state := &amp;model.DeviceState{}
+        val, _ := haMap["state"].(string)
+        state.On = (val != "closed")
+        if attr, ok := haMap["attributes"].(map[string]interface{}); ok </span><span class="cov8" title="1">{
+                if pos, ok := attr["current_position"].(float64); ok </span><span class="cov8" title="1">{
+                        state.Bri = uint8(pos * 254 / 100)
+                }</span>
+        }
+        <span class="cov8" title="1">state.Reachable = true
+        return state</span>
+}
+
+func (s *CoverStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) model.HomeAssistantCommand <span class="cov8" title="1">{
+        service := "set_cover_position"
+        params := make(map[string]interface{})
+
+        // Check if this was a brightness (position) update or just toggle
+        if hueState.UpdatedByBri </span><span class="cov8" title="1">{
+                params["position"] = int(float64(hueState.Bri) * 100 / 254)
+        }</span> else<span class="cov8" title="1"> {
+                if hueState.On </span><span class="cov8" title="1">{
+                        params["position"] = 100
+                }</span> else<span class="cov8" title="1"> {
+                        params["position"] = 0
+                }</span>
+        }
+
+        <span class="cov8" title="1">if vd.ActionConfig != nil </span><span class="cov8" title="1">{
+                if hueState.On </span><span class="cov8" title="1">{
+                        if vd.ActionConfig.OnService != "" </span><span class="cov8" title="1">{
+                                service = vd.ActionConfig.OnService
+                        }</span>
+                        <span class="cov8" title="1">if vd.ActionConfig.OnEffect != "" </span><span class="cov8" title="1">{
+                                params["effect"] = vd.ActionConfig.OnEffect
+                        }</span>
+                        <span class="cov8" title="1">for k, v := range vd.ActionConfig.OnPayload </span><span class="cov8" title="1">{
+                                params[k] = v
+                        }</span>
+                } else<span class="cov8" title="1"> {
+                        if vd.ActionConfig.OffService != "" </span><span class="cov8" title="1">{
+                                service = vd.ActionConfig.OffService
+                        }</span>
+                        <span class="cov8" title="1">if vd.ActionConfig.OffEffect != "" </span><span class="cov8" title="1">{
+                                params["effect"] = vd.ActionConfig.OffEffect
+                        }</span>
+                        <span class="cov8" title="1">for k, v := range vd.ActionConfig.OffPayload </span><span class="cov8" title="1">{
+                                params[k] = v
+                        }</span>
+                }
+        }
+
+        <span class="cov8" title="1">return model.HomeAssistantCommand{
+                Service: service,
+                Data:    params,
+        }</span>
+}
+
+func (s *CoverStrategy) GetMetadata() model.HueMetadata <span class="cov8" title="1">{
+        return model.HueMetadata{
+                Type:             "Window covering device",
+                ModelID:          "LCT001",
+                ManufacturerName: "Philips",
+        }
+}</span>
+</pre>
+
+		<pre class="file" id="file4" style="display: none">package translator
+
+import (
+        "github.com/Knetic/govaluate"
+        "hue-bridge-emulator/internal/domain/model"
+        "strings"
+)
+
+type CustomStrategy struct{}
+
+func (s *CustomStrategy) ToHue(haState any, vd *model.VirtualDevice) *model.DeviceState <span class="cov8" title="1">{
+        haMap, _ := haState.(map[string]interface{})
+        state := &amp;model.DeviceState{}
+        valStr, _ := haMap["state"].(string)
+        state.On = (valStr != "off" &amp;&amp; valStr != "closed" &amp;&amp; valStr != "unavailable")
+
+        // Default to brightness/level if available
+        var input float64
+        if attr, ok := haMap["attributes"].(map[string]interface{}); ok </span><span class="cov8" title="1">{
+                if v, ok := attr["brightness"].(float64); ok </span><span class="cov8" title="1">{
+                        input = v
+                }</span> else<span class="cov8" title="1"> if v, ok := attr["current_position"].(float64); ok </span><span class="cov8" title="1">{
+                        input = v
+                }</span> else<span class="cov8" title="1"> if v, ok := attr["temperature"].(float64); ok </span><span class="cov8" title="1">{
+                        input = v
+                }</span> else<span class="cov8" title="1"> if v, ok := attr["value"].(float64); ok </span><span class="cov8" title="1">{
+                        input = v
+                }</span>
+        }
+
+        <span class="cov8" title="1">if vd.ActionConfig != nil &amp;&amp; vd.ActionConfig.ToHueFormula != "" </span><span class="cov8" title="1">{
+                state.Bri = uint8(s.evaluate(vd.ActionConfig.ToHueFormula, input))
+        }</span> else<span class="cov8" title="1"> {
+                state.Bri = uint8(input)
+        }</span>
+
+        <span class="cov8" title="1">state.Reachable = true
+        return state</span>
+}
+
+func (s *CustomStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) model.HomeAssistantCommand <span class="cov8" title="1">{
+        service := "turn_on"
+        if !hueState.On </span><span class="cov8" title="1">{
+                service = "turn_off"
+        }</span>
+
+        <span class="cov8" title="1">params := make(map[string]interface{})
+        input := float64(hueState.Bri)
+        var output float64
+        if vd.ActionConfig != nil &amp;&amp; vd.ActionConfig.ToHAFormula != "" </span><span class="cov8" title="1">{
+                output = s.evaluate(vd.ActionConfig.ToHAFormula, input)
+        }</span> else<span class="cov8" title="1"> {
+                output = input
+        }</span>
+
+        // Guessing attribute name based on entity domain if possible
+        <span class="cov8" title="1">domain := strings.Split(vd.EntityID, ".")[0]
+        switch domain </span>{
+        case "light":<span class="cov8" title="1">
+                params["brightness"] = output</span>
+        case "cover":<span class="cov8" title="1">
+                service = "set_cover_position"
+                params["position"] = int(output)</span>
+        case "climate":<span class="cov8" title="1">
+                service = "set_temperature"
+                params["temperature"] = output</span>
+        case "input_number":<span class="cov8" title="1">
+                service = "set_value"
+                params["value"] = output</span>
+        default:<span class="cov8" title="1">
+                params["value"] = output</span>
+        }
+
+        <span class="cov8" title="1">if vd.ActionConfig != nil </span><span class="cov8" title="1">{
+                if hueState.On </span><span class="cov8" title="1">{
+                        if vd.ActionConfig.OnService != "" </span><span class="cov8" title="1">{
+                                service = vd.ActionConfig.OnService
+                        }</span>
+                        <span class="cov8" title="1">if vd.ActionConfig.OnEffect != "" </span><span class="cov8" title="1">{
+                                params["effect"] = vd.ActionConfig.OnEffect
+                        }</span>
+                        // Merge custom ON payload
+                        <span class="cov8" title="1">for k, v := range vd.ActionConfig.OnPayload </span><span class="cov8" title="1">{
+                                params[k] = v
+                        }</span>
+                } else<span class="cov8" title="1"> {
+                        if vd.ActionConfig.OffService != "" </span><span class="cov8" title="1">{
+                                service = vd.ActionConfig.OffService
+                        }</span>
+                        <span class="cov8" title="1">if vd.ActionConfig.OffEffect != "" </span><span class="cov8" title="1">{
+                                params["effect"] = vd.ActionConfig.OffEffect
+                        }</span>
+                        // Merge custom OFF payload
+                        <span class="cov8" title="1">for k, v := range vd.ActionConfig.OffPayload </span><span class="cov8" title="1">{
+                                params[k] = v
+                        }</span>
+                }
+        }
+
+        <span class="cov8" title="1">return model.HomeAssistantCommand{
+                Service: service,
+                Data:    params,
+        }</span>
+}
+
+func (s *CustomStrategy) GetMetadata() model.HueMetadata <span class="cov8" title="1">{
+        return model.HueMetadata{
+                Type:             "Extended color light",
+                ModelID:          "LCT001",
+                ManufacturerName: "Philips",
+        }
+}</span>
+
+// evaluate handles simple formulas like "x * 2.54" or "x / 2.54 + 7"
+func (s *CustomStrategy) evaluate(formula string, x float64) float64 <span class="cov8" title="1">{
+        expression, err := govaluate.NewEvaluableExpression(formula)
+        if err != nil </span><span class="cov8" title="1">{
+                return x
+        }</span>
+        <span class="cov8" title="1">parameters := make(map[string]interface{}, 1)
+        parameters["x"] = x
+
+        result, err := expression.Evaluate(parameters)
+        if err != nil </span><span class="cov8" title="1">{
+                return x
+        }</span>
+
+        <span class="cov8" title="1">if val, ok := result.(float64); ok </span><span class="cov8" title="1">{
+                return val
+        }</span>
+        <span class="cov8" title="1">return x</span>
+}
+</pre>
+
+		<pre class="file" id="file5" style="display: none">package translator
+
+import (
+        "hue-bridge-emulator/internal/domain/model"
+)
+
+type Factory struct {
+        strategies map[model.MappingType]Translator
+}
+
+func NewFactory() *Factory <span class="cov8" title="1">{
+        return &amp;Factory{
+                strategies: map[model.MappingType]Translator{
+                        model.MappingTypeLight:   &amp;LightStrategy{},
+                        model.MappingTypeCover:   &amp;CoverStrategy{},
+                        model.MappingTypeClimate: &amp;ClimateStrategy{},
+                        model.MappingTypeCustom:  &amp;CustomStrategy{},
+                },
+        }
+}</span>
+
+// GetTranslator returns the strategy for the given mapping type.
+// If the type is unknown, it logs a warning and falls back to LightStrategy.
+func (f *Factory) GetTranslator(mappingType model.MappingType) Translator <span class="cov8" title="1">{
+        if t, ok := f.strategies[mappingType]; ok </span><span class="cov8" title="1">{
+                return t
+        }</span>
+        // Fallback to light strategy for unknown types
+        <span class="cov8" title="1">return f.strategies[model.MappingTypeLight]</span>
+}
+</pre>
+
+		<pre class="file" id="file6" style="display: none">package translator
+
+import (
+        "hue-bridge-emulator/internal/domain/model"
+        "strings"
+)
+
+type LightStrategy struct{}
+
+func (s *LightStrategy) ToHue(haState any, vd *model.VirtualDevice) *model.DeviceState <span class="cov8" title="1">{
+        haMap, _ := haState.(map[string]interface{})
+        state := &amp;model.DeviceState{}
+        val, _ := haMap["state"].(string)
+        state.On = (val == "on")
+        if attr, ok := haMap["attributes"].(map[string]interface{}); ok </span><span class="cov8" title="1">{
+                if bri, ok := attr["brightness"].(float64); ok </span><span class="cov8" title="1">{
+                        state.Bri = uint8(bri)
+                }</span>
+        }
+        <span class="cov8" title="1">state.Reachable = true
+        return state</span>
+}
+
+func (s *LightStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) model.HomeAssistantCommand <span class="cov8" title="1">{
+        service := "turn_on"
+        params := make(map[string]interface{})
+
+        // Map domain to service if possible
+        domain := "light"
+        if vd.EntityID != "" </span><span class="cov8" title="1">{
+                parts := strings.Split(vd.EntityID, ".")
+                domain = parts[0]
+        }</span>
+
+        <span class="cov8" title="1">if !hueState.On </span><span class="cov8" title="1">{
+                service = "turn_off"
+        }</span> else<span class="cov8" title="1"> {
+                // Only include brightness for light domain or if explicitly on
+                if domain == "light" &amp;&amp; hueState.Bri &gt; 0 </span><span class="cov8" title="1">{
+                        params["brightness"] = hueState.Bri
+                }</span>
+        }
+
+        <span class="cov8" title="1">if vd.ActionConfig != nil </span><span class="cov8" title="1">{
+                if hueState.On </span><span class="cov8" title="1">{
+                        if vd.ActionConfig.OnService != "" </span><span class="cov8" title="1">{
+                                service = vd.ActionConfig.OnService
+                        }</span>
+                        <span class="cov8" title="1">if vd.ActionConfig.OnEffect != "" </span><span class="cov8" title="1">{
+                                params["effect"] = vd.ActionConfig.OnEffect
+                        }</span>
+                        <span class="cov8" title="1">for k, v := range vd.ActionConfig.OnPayload </span><span class="cov8" title="1">{
+                                params[k] = v
+                        }</span>
+                } else<span class="cov8" title="1"> {
+                        if vd.ActionConfig.OffService != "" </span><span class="cov8" title="1">{
+                                service = vd.ActionConfig.OffService
+                        }</span>
+                        <span class="cov8" title="1">if vd.ActionConfig.OffEffect != "" </span><span class="cov8" title="1">{
+                                params["effect"] = vd.ActionConfig.OffEffect
+                        }</span>
+                        <span class="cov8" title="1">for k, v := range vd.ActionConfig.OffPayload </span><span class="cov8" title="1">{
+                                params[k] = v
+                        }</span>
+                }
+        }
+
+        <span class="cov8" title="1">return model.HomeAssistantCommand{
+                Service: service,
+                Data:    params,
+        }</span>
+}
+
+func (s *LightStrategy) GetMetadata() model.HueMetadata <span class="cov8" title="1">{
+        return model.HueMetadata{
+                Type:             "Extended color light",
+                ModelID:          "LCT001",
+                ManufacturerName: "Philips",
+        }
+}</span>
+</pre>
+
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

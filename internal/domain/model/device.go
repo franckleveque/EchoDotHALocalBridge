@@ -27,3 +27,17 @@ type Device struct {
 	State         *DeviceState
 	VirtualDevice *VirtualDevice
 }
+
+type HAFields map[string]any
+
+type HAEntityState struct {
+	EntityID   string
+	State      string
+	Attributes HAFields
+}
+
+type HomeAssistantCommand struct {
+	Service string
+	Data    HAFields
+	Effect  string
+}

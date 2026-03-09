@@ -7,22 +7,19 @@ import (
 
 type LightStrategy struct{}
 
-func (s *LightStrategy) ToHue(haState map[string]interface{}, vd *model.VirtualDevice) *model.DeviceState {
+func (s *LightStrategy) ToHue(haState model.HAEntityState, vd *model.VirtualDevice) *model.DeviceState {
 	state := &model.DeviceState{}
-	val, _ := haState["state"].(string)
-	state.On = (val == "on")
-	if attr, ok := haState["attributes"].(map[string]interface{}); ok {
-		if bri, ok := attr["brightness"].(float64); ok {
-			state.Bri = uint8(bri)
-		}
+	state.On = (haState.State == "on")
+	if bri, ok := haState.Attributes["brightness"].(float64); ok {
+		state.Bri = uint8(bri)
 	}
 	state.Reachable = true
 	return state
 }
 
-func (s *LightStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) (string, map[string]interface{}) {
+func (s *LightStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) model.HomeAssistantCommand {
 	service := "turn_on"
-	params := make(map[string]interface{})
+	params := make(model.HAFields)
 
 	// Map domain to service if possible
 	domain := "light"
@@ -40,14 +37,13 @@ func (s *LightStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevic
 		}
 	}
 
+	var effect string
 	if vd.ActionConfig != nil {
 		if hueState.On {
 			if vd.ActionConfig.OnService != "" {
 				service = vd.ActionConfig.OnService
 			}
-			if vd.ActionConfig.OnEffect != "" {
-				params["effect"] = vd.ActionConfig.OnEffect
-			}
+			effect = vd.ActionConfig.OnEffect
 			for k, v := range vd.ActionConfig.OnPayload {
 				params[k] = v
 			}
@@ -55,16 +51,18 @@ func (s *LightStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevic
 			if vd.ActionConfig.OffService != "" {
 				service = vd.ActionConfig.OffService
 			}
-			if vd.ActionConfig.OffEffect != "" {
-				params["effect"] = vd.ActionConfig.OffEffect
-			}
+			effect = vd.ActionConfig.OffEffect
 			for k, v := range vd.ActionConfig.OffPayload {
 				params[k] = v
 			}
 		}
 	}
 
-	return service, params
+	return model.HomeAssistantCommand{
+		Service: service,
+		Data:    params,
+		Effect:  effect,
+	}
 }
 
 func (s *LightStrategy) GetMetadata() model.HueMetadata {
