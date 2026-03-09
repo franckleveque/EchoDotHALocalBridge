@@ -1,7 +1,6 @@
 package http
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"hue-bridge-emulator/internal/domain/model"
@@ -12,15 +11,19 @@ import (
 
 func (s *Server) handleAdminSetup(w http.ResponseWriter, r *http.Request) {
 	if s.authService.Exists() {
+		// Cleanup the limiter map once setup is done to free memory
+		s.limiterMu.Lock()
+		if len(s.setupLimiter) > 0 {
+			s.setupLimiter = make(map[string]time.Time)
+		}
+		s.limiterMu.Unlock()
+
 		http.Error(w, "Forbidden - Setup already completed", http.StatusForbidden)
 		return
 	}
 
 	// Rate limiting for setup
-	ip := r.RemoteAddr
-	if idx := strings.LastIndex(ip, ":"); idx != -1 {
-		ip = ip[:idx]
-	}
+	ip := s.getClientIP(r)
 	s.limiterMu.Lock()
 	if last, ok := s.setupLimiter[ip]; ok && time.Since(last) < 2*time.Second {
 		s.limiterMu.Unlock()
@@ -108,7 +111,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		err := s.admin.UpdateConfig(context.Background(), &newCfg)
+		err := s.admin.UpdateConfig(r.Context(), &newCfg)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -124,6 +127,21 @@ func (s *Server) handleHAEntities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.jsonResponse(w, entities)
+}
+
+func (s *Server) getClientIP(r *http.Request) string {
+	if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
+		return xrip
+	}
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		return strings.TrimSpace(parts[0])
+	}
+	ip := r.RemoteAddr
+	if idx := strings.LastIndex(ip, ":"); idx != -1 {
+		ip = ip[:idx]
+	}
+	return ip
 }
 
 func (s *Server) handleAdminTestAction(w http.ResponseWriter, r *http.Request) {
