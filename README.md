@@ -22,6 +22,12 @@ Access the admin UI at `http://<IP>/admin`.
   - **Formula Engine**: Use `x` as a variable to define linear mapping between Hue (0-254) and HA values.
   - **Metadata**: Select device type (Light, Cover, Climate, Custom) to ensure correct Alexa icons and behavior.
 
+## 🔒 Privacy & Security
+
+- **No Data Collection**: This project does not collect, track, or report any usage data.
+- **Bright Data clarification**: Any references to "bright" or "bri" in logs or configuration refer exclusively to **brightness intensity levels** for Hue lights. This project has no connection to the Bright Data (formerly Luminati) proxy service.
+- **Local Only**: All communication happens on your local network between the emulator and your Home Assistant instance.
+
 ## 📐 Architecture & SOLID
 
 - **Single Responsibility**: Each strategy handles one type of conversion. The bridge service only coordinates.
