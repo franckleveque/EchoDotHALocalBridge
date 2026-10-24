@@ -359,6 +359,7 @@ const adminHTML = `
     <script>
         let config = { virtual_devices: [] };
         let allEntities = [];
+        let savedByHueId = new Map();
 
         function showTab(id) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -382,6 +383,7 @@ const adminHTML = `
                 tokenInput.placeholder = 'Enter Long-Lived Access Token';
             }
 
+            rememberSaved();
             renderDevices();
             loadEntities();
         }
@@ -392,7 +394,8 @@ const adminHTML = `
                 if (!res.ok) throw new Error('Failed to fetch entities');
                 allEntities = await res.json();
                 allEntities.sort((a, b) => (a.friendly_name || '').localeCompare(b.friendly_name || ''));
-                renderEntitySelect();
+                // Keep the current selection if the modal was opened before entities arrived.
+                renderEntitySelect(document.getElementById('dev_entity').value);
             } catch (e) {
                 console.error('Error loading entities:', e);
             }
@@ -421,65 +424,99 @@ const adminHTML = `
             if (selectedValue) sel.value = selectedValue;
         }
 
+        // Canonical JSON for comparison: sorted keys, and empty values ('', false, null, {})
+        // dropped, because the server omits them when saving (omitempty) while the form emits them.
+        function canonValue(v) {
+            if (v === undefined || v === null || v === '' || v === false) return undefined;
+            if (Array.isArray(v)) return '[' + v.map(x => canonValue(x) || 'null').join(',') + ']';
+            if (typeof v === 'object') {
+                const parts = Object.keys(v).sort().map(k => [k, canonValue(v[k])])
+                    .filter(kv => kv[1] !== undefined)
+                    .map(kv => JSON.stringify(kv[0]) + ':' + kv[1]);
+                return parts.length ? '{' + parts.join(',') + '}' : undefined;
+            }
+            return JSON.stringify(v);
+        }
+
+        function canon(v) {
+            return canonValue(v) || '';
+        }
+
+        function rememberSaved() {
+            savedByHueId = new Map();
+            config.virtual_devices.forEach(vd => {
+                if (vd.hue_id) savedByHueId.set(vd.hue_id, canon(vd));
+            });
+        }
+
+        function isUnsaved(vd) {
+            if (!vd.hue_id) return true;
+            return savedByHueId.get(vd.hue_id) !== canon(vd);
+        }
+
+        function makeButton(label, onclick, className) {
+            const b = document.createElement('button');
+            b.textContent = label;
+            if (className) b.className = className;
+            b.onclick = onclick;
+            return b;
+        }
+
         function renderDevices() {
             const tbody = document.querySelector('#devicesTable tbody');
             tbody.innerHTML = '';
             config.virtual_devices.forEach((vd, index) => {
                 const tr = document.createElement('tr');
-                const hueId = vd.hue_id || '';
-                const testButtons = hueId ?
-                    '<button onclick="testAction(\''+hueId+'\', {on: true})">On</button> ' +
-                    '<button onclick="testAction(\''+hueId+'\', {on: false})">Off</button> ' +
-                    '<button onclick="testAction(\''+hueId+'\', {bri: 127})">Dim 50%</button>' :
-                    '<span style="color: #666; font-style: italic;">Save config first</span>';
-
-                tr.innerHTML =
-                    '<td>' + (hueId || 'new') + '</td>' +
-                    '<td>' + vd.name + '</td>' +
-                    '<td>' + vd.entity_id + '</td>' +
-                    '<td>' + vd.type + '</td>' +
-                    '<td>' + testButtons + '</td>' +
-                    '<td>' +
-                        '<button onclick="openDeviceModal(' + index + ')">Edit</button> ' +
-                        '<button class="delete" onclick="deleteDevice(' + index + ')">Delete</button>' +
-                    '</td>';
+                const cell = (text) => {
+                    const td = document.createElement('td');
+                    td.textContent = text;
+                    tr.appendChild(td);
+                    return td;
+                };
+                cell(vd.hue_id || 'new');
+                const nameCell = cell(vd.name);
+                if (isUnsaved(vd)) {
+                    const marker = document.createElement('span');
+                    marker.className = 'unsaved';
+                    marker.textContent = ' unsaved';
+                    marker.style.cssText = 'color: #b35900; font-style: italic; font-size: 0.85em;';
+                    marker.title = 'Differs from the saved configuration. Click Save Configuration to keep it.';
+                    nameCell.appendChild(marker);
+                }
+                cell(vd.entity_id);
+                cell(vd.type);
+                const testCell = document.createElement('td');
+                testCell.appendChild(makeButton('On', () => testRow(index, {on: true})));
+                testCell.appendChild(document.createTextNode(' '));
+                testCell.appendChild(makeButton('Off', () => testRow(index, {on: false})));
+                testCell.appendChild(document.createTextNode(' '));
+                testCell.appendChild(makeButton('Dim 50%', () => testRow(index, {bri: 127})));
+                tr.appendChild(testCell);
+                const actCell = document.createElement('td');
+                actCell.appendChild(makeButton('Edit', () => openDeviceModal(index)));
+                actCell.appendChild(document.createTextNode(' '));
+                actCell.appendChild(makeButton('Delete', () => deleteDevice(index), 'delete'));
+                tr.appendChild(actCell);
                 tbody.appendChild(tr);
             });
         }
 
-        async function testAction(hueId, state) {
-            try {
-                const res = await fetch('/api/admin/lights/' + hueId + '/state', {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(state)
-                });
-                if (res.ok) {
-                    showStatus('Action sent successfully');
-                } else {
-                    showStatus('Error sending action');
-                }
-            } catch (e) {
-                showStatus('Error: ' + e.message);
-            }
-        }
-
-        async function testCurrentForm(stateUpdate) {
+        // Reads the device form. Returns the device object, or null (after an alert) on invalid JSON.
+        function readDeviceForm() {
             let on_payload, off_payload;
             try {
                 on_payload = JSON.parse(document.getElementById('on_payload').value || '{}');
             } catch (e) {
                 alert('Invalid ON Payload JSON: ' + e.message);
-                return;
+                return null;
             }
             try {
                 off_payload = JSON.parse(document.getElementById('off_payload').value || '{}');
             } catch (e) {
                 alert('Invalid OFF Payload JSON: ' + e.message);
-                return;
+                return null;
             }
-
-            const vd = {
+            return {
                 name: document.getElementById('dev_name').value,
                 entity_id: document.getElementById('dev_entity').value,
                 type: document.getElementById('dev_type').value,
@@ -495,7 +532,10 @@ const adminHTML = `
                     omit_entity_id: document.getElementById('omit_eid').checked
                 }
             };
+        }
 
+        // Sends the device exactly as given to Home Assistant through the bridge.
+        async function sendTest(vd, stateUpdate) {
             try {
                 const res = await fetch('/admin/test-action', {
                     method: 'POST',
@@ -506,13 +546,23 @@ const adminHTML = `
                     })
                 });
                 if (res.ok) {
-                    showStatus('Test action sent successfully');
+                    showStatus('Home Assistant accepted the call on ' + vd.entity_id);
                 } else {
-                    showStatus('Error sending test action');
+                    const text = (await res.text()).trim();
+                    showStatus('Error: ' + (text || ('HTTP ' + res.status)));
                 }
             } catch (e) {
                 showStatus('Error: ' + e.message);
             }
+        }
+
+        function testRow(index, stateUpdate) {
+            return sendTest(config.virtual_devices[index], stateUpdate);
+        }
+
+        function testCurrentForm(stateUpdate) {
+            const vd = readDeviceForm();
+            if (vd) return sendTest(vd, stateUpdate);
         }
 
         function toggleAdvanced() {
@@ -565,36 +615,8 @@ const adminHTML = `
 
         function applyDeviceChanges() {
             const index = parseInt(document.getElementById('edit_index').value);
-            let on_payload, off_payload;
-            try {
-                on_payload = JSON.parse(document.getElementById('on_payload').value || '{}');
-            } catch (e) {
-                alert('Invalid ON Payload JSON: ' + e.message);
-                return;
-            }
-            try {
-                off_payload = JSON.parse(document.getElementById('off_payload').value || '{}');
-            } catch (e) {
-                alert('Invalid OFF Payload JSON: ' + e.message);
-                return;
-            }
-
-            const d = {
-                name: document.getElementById('dev_name').value,
-                entity_id: document.getElementById('dev_entity').value,
-                type: document.getElementById('dev_type').value,
-                action_config: {
-                    on_service: document.getElementById('on_service').value,
-                    on_payload: on_payload,
-                    no_op_on: document.getElementById('no_op_on').checked,
-                    off_service: document.getElementById('off_service').value,
-                    off_payload: off_payload,
-                    no_op_off: document.getElementById('no_op_off').checked,
-                    to_hue_formula: document.getElementById('to_hue').value,
-                    to_ha_formula: document.getElementById('to_ha').value,
-                    omit_entity_id: document.getElementById('omit_eid').checked
-                }
-            };
+            const d = readDeviceForm();
+            if (!d) return;
             if (index >= 0) {
                 d.hue_id = config.virtual_devices[index].hue_id;
                 config.virtual_devices[index] = d;
@@ -623,7 +645,8 @@ const adminHTML = `
             });
             if (res.ok) {
                 showStatus('Configuration saved and applied!');
-                await loadEntities();
+                // Reload so devices get their server-assigned hue_id and saved snapshot.
+                await loadData();
             } else {
                 showStatus('Error saving config');
             }
