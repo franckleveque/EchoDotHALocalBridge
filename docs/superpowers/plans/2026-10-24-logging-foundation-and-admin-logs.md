@@ -33,7 +33,7 @@
 
 ---
 
-### Task 1: Types d'erreur, tampon de lignes, handler de diffusion, go 1.26
+### Task 1: Type d'erreur HA, tampon de lignes, handler de diffusion, go 1.26
 
 **Files:**
 - Modify: `go.mod` (`go 1.26.0`)
@@ -45,7 +45,6 @@
 **Interfaces:**
 - Produces:
   - `model.HAAPIError{Status int; Body string}` ; `(*HAAPIError) Error() string` : `"HA API error: 400: <body>"`, ou `"HA API error: 400"` si le corps est vide.
-  - `model.ErrTooManyRequests`, `model.ErrInvalidTestRequest` : erreurs sentinelles (`errors.New`), messages `too many concurrent requests, please try again later` et `invalid test request`.
   - `ports.LogSource` : `Lines() []string` (ordre chronologique, copie).
   - `logging.NewLineRing(maxLines, maxLineBytes int) *LineRing` : `io.Writer` ; chaque appel à `Write` est une ligne (retour à la ligne final retiré, troncature à `maxLineBytes`), implémente `ports.LogSource`, sûr en concurrence.
   - `logging.NewHandler(out io.Writer, ring io.Writer, level slog.Leveler) slog.Handler` : diffusion vers deux `slog.NewTextHandler` via `slog.NewMultiHandler`.

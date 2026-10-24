@@ -17,7 +17,7 @@
 - L'API Hue vue par Alexa reste asynchrone (`UpdateDeviceState` inchangé). Seul `TestDeviceAction` devient synchrone, timeout 10 s.
 - Hexagonal et `make test` comme dans le plan 1 ; couverture > 80 % dans `internal/domain/service`.
 - Statuts de `/admin/test-action` : erreur HA (`*model.HAAPIError`), erreur réseau ou timeout en `502` avec le corps texte de l'erreur (`HA API error: <code>: <corps>` pour HA) ; `model.ErrTooManyRequests` en `429` ; `model.ErrInvalidTestRequest` ou corps invalide en `400` ; le reste en `500`.
-- `model.ErrTooManyRequests` et `model.ErrInvalidTestRequest` sont des erreurs sentinelles du domaine (`errors.Is`), créées dans le plan 1 (`internal/domain/model/hacall.go`). Le message de concurrence existant est conservé.
+- `model.ErrTooManyRequests` et `model.ErrInvalidTestRequest` sont des erreurs sentinelles du domaine (`errors.Is`), créées dans la tâche 1 de ce plan (`internal/domain/model/hacall.go`) avec les messages `too many concurrent requests, please try again later` et `invalid test request`. Le message de concurrence existant est conservé.
 - L'ancienne route `PUT /api/admin/lights/{id}/state` n'est pas supprimée.
 - Message de succès : `Home Assistant accepted the call on <entity_id>`. Interface en anglais. Pas de tiret cadratin.
 - Une ligne est « non enregistrée » si elle n'a pas de `hue_id` ou si son JSON diffère de la version enregistrée du même `hue_id`.
@@ -35,7 +35,7 @@
 ### Task 1: TestDeviceAction synchrone avec erreur HA et règle de luminosité
 
 **Files:**
-- Modify: `internal/domain/service/bridge.go:60-88` (`TestDeviceAction`)
+- Modify: `internal/domain/service/bridge.go:60-88` (`TestDeviceAction`), `internal/domain/model/hacall.go` (ajout des deux sentinelles)
 - Test: `internal/domain/service/bridge_test.go` (remplacer les cas async autour des l.489-580)
 
 **Interfaces:**
