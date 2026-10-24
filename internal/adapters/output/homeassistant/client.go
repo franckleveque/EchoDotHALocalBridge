@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"strings"
 	"sync"
@@ -44,12 +45,20 @@ func (c *Client) IsConfigured() bool {
 	return c.url != "" && c.token != ""
 }
 
+// redactURL hides any userinfo password so URLs are safe to log.
+func redactURL(raw string) string {
+	u, err := neturl.Parse(raw)
+	if err != nil {
+		return "<invalid url>"
+	}
+	return u.Redacted()
+}
 
 // do performs the request and logs the response line. For status >= 400 it reads
 // a truncated body, logs it and returns a *model.HAAPIError. The caller must
 // close the returned response body when the error is nil.
 func (c *Client) do(req *http.Request) (*http.Response, error) {
-	url := req.URL.String()
+	url := req.URL.Redacted()
 	start := time.Now()
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -146,7 +155,7 @@ func (c *Client) SetState(ctx context.Context, device *model.Device, cmd model.H
 	url := fmt.Sprintf("%s/api/services/%s/%s", urlBase, domain, service)
 	body, _ := json.Marshal(payload)
 
-	slog.Info("HA Service Call", "pid", os.Getpid(), "url", url, "payload", string(body))
+	slog.Info("HA Service Call", "pid", os.Getpid(), "url", redactURL(url), "payload", string(body))
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
 	if err != nil {
@@ -178,11 +187,11 @@ func (c *Client) executeEffect(ctx context.Context, effect, urlBase, token strin
 	url := fmt.Sprintf("%s/api/services/%s/%s", urlBase, parts[0], parts[1])
 	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
 	if err != nil {
-		slog.Error("Failed to create request for effect", "error", err, "url", url)
+		slog.Error("Failed to create request for effect", "error", err, "url", redactURL(url))
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	slog.Info("HA Effect Call", "url", url)
+	slog.Info("HA Effect Call", "url", redactURL(url))
 	resp, err := c.do(req)
 	if err != nil {
 		return

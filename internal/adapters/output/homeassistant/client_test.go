@@ -213,3 +213,26 @@ func TestGetRawStates_500ReturnsHAAPIError(t *testing.T) {
 		t.Fatalf("body not logged: %s", logs.String())
 	}
 }
+
+func TestDo_RedactsURLPassword(t *testing.T) {
+	logs := captureLogs(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"message":"nope"}`))
+	}))
+	defer srv.Close()
+	c := newTestClient(strings.Replace(srv.URL, "http://", "http://user:s3cretpw@", 1))
+	_ = c.SetState(context.Background(), testDevice(), model.HomeAssistantCommand{Service: "light.turn_on", Effect: "script.fx"})
+	_, _ = c.GetRawStates(context.Background())
+	url := c.url
+	srv.Close()
+	_ = newTestClient(url).SetState(context.Background(), testDevice(), model.HomeAssistantCommand{Service: "light.turn_on", Effect: "script.fx"})
+
+	out := logs.String()
+	if !strings.Contains(out, "HA Service") {
+		t.Fatalf("expected HA logs, got: %s", out)
+	}
+	if strings.Contains(out, "s3cretpw") {
+		t.Fatalf("URL password leaked in logs: %s", out)
+	}
+}

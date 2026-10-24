@@ -1,7 +1,9 @@
 package http
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,8 +40,10 @@ func TestLogsPage_UsesTextContent(t *testing.T) {
 	if !strings.Contains(body, "textContent") {
 		t.Error("page must render values with textContent")
 	}
-	if strings.Contains(body, "innerHTML") {
-		t.Error("page must never use innerHTML")
+	for _, banned := range []string{"innerHTML", "insertAdjacentHTML", "outerHTML"} {
+		if strings.Contains(body, banned) {
+			t.Errorf("page must never use %s", banned)
+		}
 	}
 }
 
@@ -78,5 +82,42 @@ func TestLogsPage_HasEmptyStateMessages(t *testing.T) {
 		if !strings.Contains(body, msg) {
 			t.Errorf("page missing empty-state message %q", msg)
 		}
+	}
+}
+
+func captureSlog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	buf := &bytes.Buffer{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return buf
+}
+
+func TestLogsDataPolling_DoesNotAddLogLines(t *testing.T) {
+	buf := captureSlog(t)
+	h := newLogsTestServer().Handler()
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/admin/logs/data", nil)
+		req.SetBasicAuth("a", "b")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+	}
+	if buf.Len() != 0 {
+		t.Errorf("polling /admin/logs/data must not log, got: %s", buf.String())
+	}
+}
+
+func TestLoggingMiddleware_StillLogsOtherRoutes(t *testing.T) {
+	buf := captureSlog(t)
+	h := newLogsTestServer().Handler()
+	req := httptest.NewRequest(http.MethodGet, "/admin/logs", nil)
+	req.SetBasicAuth("a", "b")
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if !strings.Contains(buf.String(), "HTTP request") || !strings.Contains(buf.String(), "/admin/logs") {
+		t.Errorf("expected request log line, got: %s", buf.String())
 	}
 }

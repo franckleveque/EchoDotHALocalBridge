@@ -191,6 +191,10 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		}
 
 		next.ServeHTTP(lrw, r)
+		// The logs page polls this route; logging it would flood the ring and evict real entries.
+		if r.URL.Path == "/admin/logs/data" {
+			return
+		}
 		slog.Info("HTTP request", "method", r.Method, "path", r.URL.Path, "from", r.RemoteAddr, "status", lrw.statusCode, "duration", time.Since(start))
 	})
 }
