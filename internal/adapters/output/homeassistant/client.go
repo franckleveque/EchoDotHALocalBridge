@@ -6,12 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"hue-bridge-emulator/internal/domain/model"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
+
+const maxErrorBodyBytes = 2048
 
 type Client struct {
 	url        string
@@ -41,6 +45,28 @@ func (c *Client) IsConfigured() bool {
 }
 
 
+// do performs the request and logs the response line. For status >= 400 it reads
+// a truncated body, logs it and returns a *model.HAAPIError. The caller must
+// close the returned response body when the error is nil.
+func (c *Client) do(req *http.Request) (*http.Response, error) {
+	url := req.URL.String()
+	start := time.Now()
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		slog.Error("HA Service Transport Error", "url", url, "error", err)
+		return nil, err
+	}
+	slog.Info("HA Service Response", "url", url, "status", resp.StatusCode, "duration_ms", time.Since(start).Milliseconds())
+	if resp.StatusCode >= 400 {
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+		body := string(raw)
+		slog.Error("HA Service Error", "url", url, "status", resp.StatusCode, "body", body)
+		return nil, &model.HAAPIError{Status: resp.StatusCode, Body: body}
+	}
+	return resp, nil
+}
+
 func (c *Client) GetRawStates(ctx context.Context) ([]model.HAEntityState, error) {
 	c.mu.RLock()
 	url := c.url
@@ -57,15 +83,11 @@ func (c *Client) GetRawStates(ctx context.Context) ([]model.HAEntityState, error
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HA API error: %d", resp.StatusCode)
-	}
 
 	type haState struct {
 		EntityID   string         `json:"entity_id"`
@@ -133,15 +155,11 @@ func (c *Client) SetState(ctx context.Context, device *model.Device, cmd model.H
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("HA API error: %d", resp.StatusCode)
-	}
 
 	// Handle custom effects if provided
 	if cmd.Effect != "" {
@@ -164,15 +182,11 @@ func (c *Client) executeEffect(ctx context.Context, effect, urlBase, token strin
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := c.httpClient.Do(req)
+	slog.Info("HA Effect Call", "url", url)
+	resp, err := c.do(req)
 	if err != nil {
-		slog.Error("Failed to execute effect", "error", err, "url", url)
 		return
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		slog.Warn("Effect call returned error", "status", resp.StatusCode, "url", url)
-	}
 }
 
