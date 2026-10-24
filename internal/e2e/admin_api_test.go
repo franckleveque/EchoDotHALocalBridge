@@ -5,6 +5,7 @@ package e2e_test
 import (
 	"encoding/json"
 	"hue-bridge-emulator/internal/domain/model"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -114,4 +115,88 @@ func TestAdminHAEntities(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&entities)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(entities))
+}
+
+func adminGet(t *testing.T, url string, auth bool) *http.Response {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	if auth {
+		req.SetBasicAuth("admin", "password123")
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { resp.Body.Close() })
+	return resp
+}
+
+func setupAdmin(t *testing.T, base string) {
+	t.Helper()
+	resp, err := http.Post(base+"/admin/setup", "application/x-www-form-urlencoded",
+		strings.NewReader("username=admin&password=password123"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+}
+
+func TestAdminLogs_RequiresAuth(t *testing.T) {
+	ts := newTestStack(t, nil, nil)
+	for _, p := range []string{"/admin/logs", "/admin/logs/data"} {
+		assert.Equal(t, http.StatusForbidden, adminGet(t, ts.URL+p, false).StatusCode, p+" before setup")
+	}
+	setupAdmin(t, ts.URL)
+	for _, p := range []string{"/admin/logs", "/admin/logs/data"} {
+		assert.Equal(t, http.StatusUnauthorized, adminGet(t, ts.URL+p, false).StatusCode, p)
+		assert.Equal(t, http.StatusOK, adminGet(t, ts.URL+p, true).StatusCode, p)
+	}
+}
+
+func TestAdminLogs_EmptyIsJSONArray(t *testing.T) {
+	ts := newTestStack(t, nil, nil)
+	setupAdmin(t, ts.URL)
+	resp := adminGet(t, ts.URL+"/admin/logs/data", true)
+	b, _ := io.ReadAll(resp.Body)
+	assert.Equal(t, "[]", strings.TrimSpace(string(b)))
+}
+
+func TestAdminLogs_ShowsFailedHACall(t *testing.T) {
+	ha := newFakeHA(t, nil)
+	ha.failStatus = http.StatusBadRequest
+	ha.failBody = `{"message":"Service not found."}`
+	ts := newTestStack(t, ha, nil)
+	setupAdmin(t, ts.URL)
+
+	payload := `{"virtual_device":{"hue_id":"1","name":"T","entity_id":"light.test","type":"light"},"state_update":{"on":true}}`
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/admin/test-action", strings.NewReader(payload))
+	req.SetBasicAuth("admin", "password123")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	assert.NoError(t, err)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	assert.Eventually(t, func() bool {
+		r, err := http.NewRequest(http.MethodGet, ts.URL+"/admin/logs/data", nil)
+		if err != nil {
+			return false
+		}
+		r.SetBasicAuth("admin", "password123")
+		resp, err := http.DefaultClient.Do(r)
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		var lines []string
+		if json.NewDecoder(resp.Body).Decode(&lines) != nil {
+			return false
+		}
+		for _, l := range lines {
+			if strings.Contains(l, "Service not found.") && strings.Contains(l, "status=400") {
+				return true
+			}
+		}
+		return false
+	}, 3*time.Second, 50*time.Millisecond)
 }

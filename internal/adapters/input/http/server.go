@@ -56,6 +56,8 @@ func (s *Server) Mux() *http.ServeMux {
 	mux.Handle("/admin/config", s.withBasicAuth(http.HandlerFunc(s.handleConfig)))
 	mux.Handle("/admin/ha-entities", s.withBasicAuth(http.HandlerFunc(s.handleHAEntities)))
 	mux.Handle("/admin/test-action", s.withBasicAuth(http.HandlerFunc(s.handleAdminTestAction)))
+	mux.Handle("/admin/logs", s.withBasicAuth(http.HandlerFunc(s.handleLogsPage)))
+	mux.Handle("/admin/logs/data", s.withBasicAuth(http.HandlerFunc(s.handleLogsData)))
 
 	return mux
 }

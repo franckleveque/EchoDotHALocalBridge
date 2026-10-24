@@ -236,6 +236,7 @@ const adminHTML = `
 </head>
 <body>
     <h1>Hue Bridge Emulator Admin</h1>
+    <p><a href="/admin/logs">Logs</a></p>
     <div class="tabs">
         <div class="tab active" onclick="showTab('general')">General Config</div>
         <div class="tab" onclick="showTab('virtual-devices')">Virtual Devices</div>
