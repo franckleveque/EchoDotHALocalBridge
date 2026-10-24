@@ -34,9 +34,14 @@ func (b *syncBuffer) String() string {
 
 func captureLogs(t *testing.T) *syncBuffer {
 	t.Helper()
+	return captureLogsAt(t, slog.LevelDebug)
+}
+
+func captureLogsAt(t *testing.T, level slog.Level) *syncBuffer {
+	t.Helper()
 	buf := &syncBuffer{}
 	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: level})))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 	return buf
 }
@@ -114,7 +119,7 @@ func TestSetState_LogsSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := logs.String()
-	if !strings.Contains(out, "HA Service Response") || !strings.Contains(out, "status=200") {
+	if !strings.Contains(out, "HA API Response") || !strings.Contains(out, "status=200") || !strings.Contains(out, "op=service_call") {
 		t.Fatalf("log missing response line: %s", out)
 	}
 }
@@ -187,7 +192,7 @@ func TestExecuteEffect_Logged(t *testing.T) {
 	}
 	found := false
 	for _, line := range strings.Split(logs.String(), "\n") {
-		if strings.Contains(line, "HA Service Response") && strings.Contains(line, "/api/services/script/fx") {
+		if strings.Contains(line, "HA API Response") && strings.Contains(line, "op=effect") && strings.Contains(line, "/api/services/script/fx") {
 			found = true
 		}
 	}
@@ -229,10 +234,62 @@ func TestDo_RedactsURLPassword(t *testing.T) {
 	_ = newTestClient(url).SetState(context.Background(), testDevice(), model.HomeAssistantCommand{Service: "light.turn_on", Effect: "script.fx"})
 
 	out := logs.String()
-	if !strings.Contains(out, "HA Service") {
+	if !strings.Contains(out, "HA API") {
 		t.Fatalf("expected HA logs, got: %s", out)
 	}
 	if strings.Contains(out, "s3cretpw") {
 		t.Fatalf("URL password leaked in logs: %s", out)
+	}
+}
+
+func TestGetRawStates_SuccessIsNotLoggedAtInfo(t *testing.T) {
+	logs := captureLogsAt(t, slog.LevelInfo)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	if _, err := newTestClient(srv.URL).GetRawStates(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if out := logs.String(); out != "" {
+		t.Fatalf("state polling must stay out of the info log, got: %s", out)
+	}
+}
+
+func TestGetRawStates_SuccessIsLoggedAtDebugAsStatesOperation(t *testing.T) {
+	logs := captureLogsAt(t, slog.LevelDebug)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	if _, err := newTestClient(srv.URL).GetRawStates(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "HA API Response") || !strings.Contains(out, "op=states") {
+		t.Fatalf("expected a debug line labelled op=states, got: %s", out)
+	}
+	if strings.Contains(out, "HA Service") {
+		t.Fatalf("state fetch must not be labelled as a service call: %s", out)
+	}
+}
+
+func TestGetRawStates_ErrorIsLabelledAsStatesOperation(t *testing.T) {
+	logs := captureLogsAt(t, slog.LevelInfo)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+		_, _ = w.Write([]byte("boom"))
+	}))
+	defer srv.Close()
+
+	_, _ = newTestClient(srv.URL).GetRawStates(context.Background())
+	out := logs.String()
+	if !strings.Contains(out, "HA API Error") || !strings.Contains(out, "op=states") || !strings.Contains(out, "boom") {
+		t.Fatalf("state fetch error must stay visible and labelled op=states, got: %s", out)
+	}
+	if strings.Contains(out, "HA Service") {
+		t.Fatalf("state fetch must not be labelled as a service call: %s", out)
 	}
 }

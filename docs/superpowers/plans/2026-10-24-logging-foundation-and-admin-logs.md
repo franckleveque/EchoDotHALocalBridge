@@ -84,13 +84,13 @@
 
 **Interfaces:**
 - Consumes: `model.HAAPIError`.
-- Produces: `SetState` et `GetRawStates` renvoient `*model.HAAPIError` pour tout code >= 400 (`errors.As` fonctionne). Le journal `slog` contient : ligne existante `HA Service Call` (url, payload), nouvelle ligne `HA Service Response` (url, status, duration_ms) à l'info, et `HA Service Error` (url, status, body tronqué à 2048) au niveau error pour >= 400. Les erreurs de transport sont journalisées au niveau error avec l'URL.
+- Produces: `SetState` et `GetRawStates` renvoient `*model.HAAPIError` pour tout code >= 400 (`errors.As` fonctionne). Le journal `slog` contient : ligne existante `HA Service Call` (url, payload), nouvelle ligne `HA API Response` (op, url, status, duration_ms) à l'info, et `HA API Error` (op, url, status, body tronqué à 2048) au niveau error pour >= 400. Les erreurs de transport sont journalisées au niveau error avec l'URL.
 
 - [ ] **Step 1: Tests qui échouent** (serveur `httptest`, client configuré dessus ; capturer les logs avec un handler `slog` de test posé via `slog.SetDefault` puis restauré) :
   - `TestSetState_400ReturnsHAAPIErrorWithBody` : HA répond 400 `{"message":"Service not found."}` → `errors.As` donne `Status=400` et le même `Body`.
   - `TestSetState_LogsErrorBody` : le journal capturé contient `Service not found.` et `status=400`.
   - `TestSetState_BodyTruncated` : corps de 5000 octets → `len(Body) <= 2048`.
-  - `TestSetState_LogsSuccess` : HA répond 200 → le journal contient `HA Service Response` et `status=200`.
+  - `TestSetState_LogsSuccess` : HA répond 200 → le journal contient `HA API Response`, `op=service_call` et `status=200`.
   - `TestSetState_TransportError` : serveur fermé → erreur non nulle, journal d'erreur avec l'URL.
   - `TestSetState_TokenNeverLogged` : `test-token` est absent du journal dans tous les cas.
   - `TestSetState_LogsActualPayload` : une commande dont `Data` contient `{"value":0}` produit un journal contenant ce payload.

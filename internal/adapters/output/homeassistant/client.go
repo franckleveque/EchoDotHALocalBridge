@@ -54,23 +54,37 @@ func redactURL(raw string) string {
 	return u.Redacted()
 }
 
-// do performs the request and logs the response line. For status >= 400 it reads
-// a truncated body, logs it and returns a *model.HAAPIError. The caller must
-// close the returned response body when the error is nil.
-func (c *Client) do(req *http.Request) (*http.Response, error) {
+// Operation labels attached to every response log line so that service calls,
+// effects and the periodic state fetch can be told apart.
+const (
+	opServiceCall = "service_call"
+	opEffect      = "effect"
+	opStates      = "states"
+)
+
+// do performs the request and logs the response line, labelled with op. The
+// periodic state fetch only logs successes at debug level so it does not crowd
+// out service calls in the info log. For status >= 400 it reads a truncated
+// body, logs it and returns a *model.HAAPIError. The caller must close the
+// returned response body when the error is nil.
+func (c *Client) do(req *http.Request, op string) (*http.Response, error) {
 	url := req.URL.Redacted()
 	start := time.Now()
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		slog.Error("HA Service Transport Error", "url", url, "error", err)
+		slog.Error("HA API Transport Error", "op", op, "url", url, "error", err)
 		return nil, err
 	}
-	slog.Info("HA Service Response", "url", url, "status", resp.StatusCode, "duration_ms", time.Since(start).Milliseconds())
+	level := slog.LevelInfo
+	if op == opStates {
+		level = slog.LevelDebug
+	}
+	slog.Log(req.Context(), level, "HA API Response", "op", op, "url", url, "status", resp.StatusCode, "duration_ms", time.Since(start).Milliseconds())
 	if resp.StatusCode >= 400 {
 		defer resp.Body.Close()
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 		body := string(raw)
-		slog.Error("HA Service Error", "url", url, "status", resp.StatusCode, "body", body)
+		slog.Error("HA API Error", "op", op, "url", url, "status", resp.StatusCode, "body", body)
 		return nil, &model.HAAPIError{Status: resp.StatusCode, Body: body}
 	}
 	return resp, nil
@@ -92,7 +106,7 @@ func (c *Client) GetRawStates(ctx context.Context) ([]model.HAEntityState, error
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	resp, err := c.do(req)
+	resp, err := c.do(req, opStates)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +178,7 @@ func (c *Client) SetState(ctx context.Context, device *model.Device, cmd model.H
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.do(req)
+	resp, err := c.do(req, opServiceCall)
 	if err != nil {
 		return err
 	}
@@ -192,7 +206,7 @@ func (c *Client) executeEffect(ctx context.Context, effect, urlBase, token strin
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	slog.Info("HA Effect Call", "url", redactURL(url))
-	resp, err := c.do(req)
+	resp, err := c.do(req, opEffect)
 	if err != nil {
 		return
 	}
