@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"hue-bridge-emulator/internal/domain/model"
@@ -136,15 +137,16 @@ func TestSetState_TransportError(t *testing.T) {
 
 func TestSetState_TokenNeverLogged(t *testing.T) {
 	logs := captureLogs(t)
-	status := 200
+	var status atomic.Int32
+	status.Store(200)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(status)
+		w.WriteHeader(int(status.Load()))
 		_, _ = w.Write([]byte(`{"message":"nope"}`))
 	}))
 	c := newTestClient(srv.URL)
 	cmd := model.HomeAssistantCommand{Service: "light.turn_on", Effect: "script.fx"}
 	_ = c.SetState(context.Background(), testDevice(), cmd)
-	status = 400
+	status.Store(400)
 	_ = c.SetState(context.Background(), testDevice(), cmd)
 	_, _ = c.GetRawStates(context.Background())
 	url := srv.URL
@@ -183,9 +185,14 @@ func TestExecuteEffect_Logged(t *testing.T) {
 	if err := newTestClient(srv.URL).SetState(context.Background(), testDevice(), cmd); err != nil {
 		t.Fatal(err)
 	}
-	out := logs.String()
-	if !strings.Contains(out, "HA Service Response") || !strings.Contains(out, "/api/services/script/fx") {
-		t.Fatalf("effect response not logged: %s", out)
+	found := false
+	for _, line := range strings.Split(logs.String(), "\n") {
+		if strings.Contains(line, "HA Service Response") && strings.Contains(line, "/api/services/script/fx") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("effect response not logged: %s", logs.String())
 	}
 }
 
