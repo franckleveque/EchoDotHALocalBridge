@@ -46,6 +46,7 @@ func TestHandleAdminTestAction_StatusMapping(t *testing.T) {
 		{"network error", errors.New("dial tcp: refused"), body, 502},
 		{"too many", model.ErrTooManyRequests, body, 429},
 		{"invalid", model.ErrInvalidTestRequest, body, 400},
+		{"no-op", model.ErrNoOpAction, body, 409},
 		{"missing device", nil, `{"state_update":{"on":true}}`, 400},
 		{"missing state", nil, `{"virtual_device":{}}`, 400},
 		{"bad json", nil, `{`, 400},
@@ -57,6 +58,9 @@ func TestHandleAdminTestAction_StatusMapping(t *testing.T) {
 			s.handleAdminTestAction(rec, httptest.NewRequest("POST", "/admin/test-action", strings.NewReader(c.body)))
 			if rec.Code != c.want {
 				t.Errorf("got %d want %d (%s)", rec.Code, c.want, rec.Body.String())
+			}
+			if c.want == 409 && !strings.Contains(rec.Body.String(), c.err.Error()) {
+				t.Errorf("409 body %q lacks sentinel text", rec.Body.String())
 			}
 			if c.want == 502 && !strings.Contains(rec.Body.String(), c.err.Error()) {
 				t.Errorf("body %q lacks error text", rec.Body.String())

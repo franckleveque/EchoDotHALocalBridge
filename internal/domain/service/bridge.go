@@ -70,6 +70,14 @@ func (s *BridgeService) TestDeviceAction(ctx context.Context, vd *model.VirtualD
 		stateCopy.On = true
 	}
 
+	// Same No-Op rule as UpdateDeviceState. Never return nil here: the caller
+	// would report success although nothing reached Home Assistant.
+	if ac := vd.ActionConfig; ac != nil {
+		if (stateCopy.On && ac.NoOpOn) || (!stateCopy.On && ac.NoOpOff) {
+			return model.ErrNoOpAction
+		}
+	}
+
 	select {
 	case s.workerSem <- struct{}{}:
 		defer func() { <-s.workerSem }()

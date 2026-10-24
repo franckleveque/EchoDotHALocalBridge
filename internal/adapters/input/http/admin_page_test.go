@@ -18,7 +18,7 @@ func TestAdminPage_Markers(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"function testRow(", "function sendTest(", "function readDeviceForm(", "isUnsaved("} {
+	for _, want := range []string{"function testRow(", "function sendTest(", "function readDeviceForm(", "isUnsaved(", "Not sent: ", "Sending to Home Assistant...", "clearTimeout(statusTimer)"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("admin page must contain %q", want)
 		}

@@ -171,6 +171,8 @@ func (s *Server) handleAdminTestAction(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, model.ErrInvalidTestRequest):
 			http.Error(w, err.Error(), http.StatusBadRequest)
+		case errors.Is(err, model.ErrNoOpAction):
+			http.Error(w, err.Error(), http.StatusConflict)
 		case errors.Is(err, model.ErrTooManyRequests):
 			http.Error(w, err.Error(), http.StatusTooManyRequests)
 		case errors.As(err, &haErr):
@@ -536,6 +538,7 @@ const adminHTML = `
 
         // Sends the device exactly as given to Home Assistant through the bridge.
         async function sendTest(vd, stateUpdate) {
+            showStatus('Sending to Home Assistant...');
             try {
                 const res = await fetch('/admin/test-action', {
                     method: 'POST',
@@ -549,7 +552,11 @@ const adminHTML = `
                     showStatus('Home Assistant accepted the call on ' + vd.entity_id);
                 } else {
                     const text = (await res.text()).trim();
-                    showStatus('Error: ' + (text || ('HTTP ' + res.status)));
+                    if (res.status === 409) {
+                        showStatus('Not sent: ' + text);
+                    } else {
+                        showStatus('Error: ' + (text || ('HTTP ' + res.status)));
+                    }
                 }
             } catch (e) {
                 showStatus('Error: ' + e.message);
@@ -657,12 +664,17 @@ const adminHTML = `
             await saveAll();
         };
 
+        let statusTimer = null;
         function showStatus(msg) {
             const s = document.getElementById('status');
             s.textContent = msg;
             s.style.display = 'block';
             s.className = msg.includes('Error') ? 'error' : 'success';
-            setTimeout(() => { s.style.display = 'none'; }, 3000);
+            if (statusTimer) clearTimeout(statusTimer);
+            let ms = 3000;
+            if (msg.startsWith('Error:') || msg.startsWith('Not sent:')) ms = 10000;
+            else if (msg.startsWith('Sending to Home Assistant')) ms = 30000;
+            statusTimer = setTimeout(() => { s.style.display = 'none'; statusTimer = null; }, ms);
         }
 
         loadData();
