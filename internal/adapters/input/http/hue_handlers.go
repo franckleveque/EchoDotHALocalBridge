@@ -3,7 +3,6 @@ package http
 import (
 	"encoding/json"
 	"fmt"
-	"hue-bridge-emulator/internal/domain/model"
 	"net/http"
 	"strings"
 
@@ -143,14 +142,7 @@ func (s *Server) handleSetLightState(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 
-	stateUpdate := &model.DeviceState{}
-	if on, ok := rawState["on"].(bool); ok {
-		stateUpdate.On = on
-	}
-	if bri, ok := rawState["bri"].(float64); ok {
-		stateUpdate.Bri = uint8(bri)
-		stateUpdate.UpdatedByBri = true
-	}
+	stateUpdate := parseStateUpdate(rawState)
 	// TODO: handle other fields if needed, but for now these are the main ones
 
 	err := s.hue.UpdateDeviceState(r.Context(), id, stateUpdate)

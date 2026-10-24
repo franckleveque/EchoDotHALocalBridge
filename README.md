@@ -113,6 +113,9 @@ If you get `ERR_CONNECTION_REFUSED` or a "Bind for 0.0.0.0:80 failed" error:
     - The server listens on `0.0.0.0:80` (all interfaces). If you get this error, it's likely a firewall (UFW) or port conflict.
     - Ensure no other service is using port 80: `sudo lsof -i :80`
     - Check the bridge logs: `docker compose logs -f`
+    - Logs are also visible at `/admin/logs` (in memory only: the last 500 lines, lost at restart).
+    - `LOG_LEVEL=DEBUG` also logs Hue request bodies. Use `INFO` in normal use.
+    - Docker log files are capped at 3 x 10 MB (`logging` block in `docker-compose.yml`) so they cannot fill the SD card.
     - **Crucial**: Verify the "Automatically discovered local IP" in logs. If it says `192.168.65.6` but your network is `192.168.1.x`, the bridge is advertising the wrong address via SSDP.
     - **Fix**: Manually set your real RPi IP in the environment: `LOCAL_IP=192.168.1.XX` (then update `docker-compose.yml` environment if necessary) OR use `PREFERRED_NETWORK=192.168.1.0/24`.
 - **Alexa cannot find the bridge**:

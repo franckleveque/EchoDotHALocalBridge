@@ -24,6 +24,7 @@ type Server struct {
 	ip          string
 	setupLimiter map[string]time.Time
 	limiterMu    sync.Mutex
+	logs         ports.LogSource
 }
 
 func NewServer(hue ports.HueEmulationPort, admin ports.AdminPort, authService ports.AuthService, ip string) *Server {
@@ -34,6 +35,12 @@ func NewServer(hue ports.HueEmulationPort, admin ports.AdminPort, authService po
 		ip:           ip,
 		setupLimiter: make(map[string]time.Time),
 	}
+}
+
+// SetLogSource configures the source of recent log lines. Without one, log
+// readers behave like an empty buffer.
+func (s *Server) SetLogSource(src ports.LogSource) {
+	s.logs = src
 }
 
 func (s *Server) Mux() *http.ServeMux {
@@ -49,6 +56,8 @@ func (s *Server) Mux() *http.ServeMux {
 	mux.Handle("/admin/config", s.withBasicAuth(http.HandlerFunc(s.handleConfig)))
 	mux.Handle("/admin/ha-entities", s.withBasicAuth(http.HandlerFunc(s.handleHAEntities)))
 	mux.Handle("/admin/test-action", s.withBasicAuth(http.HandlerFunc(s.handleAdminTestAction)))
+	mux.Handle("/admin/logs", s.withBasicAuth(http.HandlerFunc(s.handleLogsPage)))
+	mux.Handle("/admin/logs/data", s.withBasicAuth(http.HandlerFunc(s.handleLogsData)))
 
 	return mux
 }
@@ -182,6 +191,10 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		}
 
 		next.ServeHTTP(lrw, r)
+		// The logs page polls this route; logging it would flood the ring and evict real entries.
+		if r.URL.Path == "/admin/logs/data" {
+			return
+		}
 		slog.Info("HTTP request", "method", r.Method, "path", r.URL.Path, "from", r.RemoteAddr, "status", lrw.statusCode, "duration", time.Since(start))
 	})
 }

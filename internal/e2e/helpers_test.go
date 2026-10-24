@@ -8,25 +8,34 @@ import (
 	"fmt"
 	httpAdapter "hue-bridge-emulator/internal/adapters/input/http"
 	"hue-bridge-emulator/internal/adapters/output/homeassistant"
+	"hue-bridge-emulator/internal/adapters/output/logging"
 	"hue-bridge-emulator/internal/adapters/output/persistence"
 	"hue-bridge-emulator/internal/domain/model"
 	"hue-bridge-emulator/internal/domain/service"
 	"hue-bridge-emulator/internal/domain/translator"
-	"math/rand"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
+
+// nextClientIP numbers the synthetic client addresses handed to test requests.
+var nextClientIP atomic.Uint32
 
 // fakeHA simulates the Home Assistant REST API.
 type fakeHA struct {
 	mu     sync.Mutex
 	states []map[string]interface{} // returned by GET /api/states
 	calls  []haServiceCall          // recorded by POST /api/services/...
-	server *httptest.Server
+	// failStatus/failBody, when set, make service calls answer with an error.
+	failStatus int
+	failBody   string
+	server     *httptest.Server
 }
 
 type haServiceCall struct {
@@ -61,7 +70,13 @@ func newFakeHA(t *testing.T, states []map[string]interface{}) *fakeHA {
 		f.calls = append(f.calls, haServiceCall{
 			Domain: parts[0], Service: parts[1], Payload: payload,
 		})
+		failStatus, failBody := f.failStatus, f.failBody
 		f.mu.Unlock()
+		if failStatus != 0 {
+			w.WriteHeader(failStatus)
+			w.Write([]byte(failBody))
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -137,10 +152,19 @@ func newTestStack(t *testing.T, ha *fakeHA, cfg *model.Config) *httptest.Server 
 	bridgeSvc := service.NewBridgeService(haClient, cfgRepo, translatorFactory)
 
 	srv := httpAdapter.NewServer(bridgeSvc, bridgeSvc, authService, "127.0.0.1")
+
+	// Capture slog output in a ring for the duration of the test. The default
+	// logger is process-global, so tests using this helper must not be parallel.
+	ring := logging.NewLineRing(500, 4096)
+	prevLogger := slog.Default()
+	slog.SetDefault(slog.New(logging.NewHandler(io.Discard, ring, slog.LevelInfo)))
+	t.Cleanup(func() { slog.SetDefault(prevLogger) })
+	srv.SetLogSource(ring)
 	mux := srv.Mux()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Bypass rate limiter by using a random RemoteAddr
-		r.RemoteAddr = fmt.Sprintf("127.0.0.%d:1234", rand.Intn(254)+1)
+		// Bypass the per-IP rate limiter: every request gets its own address.
+		n := nextClientIP.Add(1)
+		r.RemoteAddr = fmt.Sprintf("10.%d.%d.%d:1234", (n>>16)&0xff, (n>>8)&0xff, n&0xff)
 		mux.ServeHTTP(w, r)
 	}))
 	t.Cleanup(ts.Close)
