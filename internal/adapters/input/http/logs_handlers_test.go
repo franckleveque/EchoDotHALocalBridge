@@ -66,3 +66,17 @@ func TestLogsData_NilSourceIsEmptyArray(t *testing.T) {
 		t.Errorf("body = %q, want []", got)
 	}
 }
+
+func TestLogsPage_HasEmptyStateMessages(t *testing.T) {
+	s := newLogsTestServer()
+	req := httptest.NewRequest(http.MethodGet, "/admin/logs", nil)
+	req.SetBasicAuth("a", "b")
+	rec := httptest.NewRecorder()
+	s.Mux().ServeHTTP(rec, req)
+	body := rec.Body.String()
+	for _, msg := range []string{"No log lines yet.", "No lines match the filter."} {
+		if !strings.Contains(body, msg) {
+			t.Errorf("page missing empty-state message %q", msg)
+		}
+	}
+}

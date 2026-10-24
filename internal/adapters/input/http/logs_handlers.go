@@ -68,7 +68,13 @@ const adminLogsHTML = `<!DOCTYPE html>
             var q = filterEl.value.toLowerCase();
             var shown = lines.filter(function (l) { return q === '' || l.toLowerCase().indexOf(q) !== -1; });
             var atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
-            pre.textContent = shown.join('\n');
+            if (lines.length === 0) {
+                pre.textContent = 'No log lines yet.';
+            } else if (shown.length === 0) {
+                pre.textContent = 'No lines match the filter.';
+            } else {
+                pre.textContent = shown.join('\n');
+            }
             info.textContent = shown.length + ' / ' + lines.length + ' lines';
             if (atBottom) { pre.scrollTop = pre.scrollHeight; }
         }
