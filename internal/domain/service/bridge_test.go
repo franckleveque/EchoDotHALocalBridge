@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"hue-bridge-emulator/internal/domain/model"
 	"hue-bridge-emulator/internal/ports"
@@ -525,9 +526,82 @@ func TestBridgeService_TestDeviceAction(t *testing.T) {
 	// Test case 3: Error in SetState
 	mockHA.On("SetState", mock.Anything, mock.Anything, mock.Anything).Return(fmt.Errorf("HA error")).Once()
 	err = s.TestDeviceAction(context.Background(), vd, &model.DeviceState{On: false})
-	assert.NoError(t, err)
+	assert.EqualError(t, err, "HA error")
 
-	time.Sleep(100 * time.Millisecond)
+	mockHA.AssertExpectations(t)
+}
+
+func TestTestDeviceAction_ReturnsHAError(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockTF := new(MockTranslatorFactory)
+	mockT := new(MockTranslator)
+	vd := &model.VirtualDevice{Name: "L", EntityID: "light.test", Type: model.MappingTypeLight}
+
+	mockTF.On("GetTranslator", model.MappingTypeLight).Return(mockT)
+	mockT.On("ToHA", mock.Anything, mock.Anything).Return(model.HomeAssistantCommand{Service: "turn_on"})
+	mockHA.On("SetState", mock.Anything, mock.Anything, mock.Anything).
+		Return(&model.HAAPIError{Status: 400, Body: "nope"}).Once()
+
+	s := NewBridgeService(mockHA, new(MockConfigRepo), mockTF)
+	err := s.TestDeviceAction(context.Background(), vd, &model.DeviceState{On: true})
+
+	var haErr *model.HAAPIError
+	assert.True(t, errors.As(err, &haErr))
+	assert.Equal(t, 400, haErr.Status)
+	assert.Equal(t, "nope", haErr.Body)
+	mockHA.AssertNumberOfCalls(t, "SetState", 1)
+}
+
+func TestTestDeviceAction_BriImpliesOn(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockTF := new(MockTranslatorFactory)
+	mockT := new(MockTranslator)
+	vd := &model.VirtualDevice{Name: "L", EntityID: "light.test", Type: model.MappingTypeLight}
+	cmd := model.HomeAssistantCommand{Service: "turn_on", Data: model.HAFields{"brightness": 127}}
+
+	mockTF.On("GetTranslator", model.MappingTypeLight).Return(mockT)
+	mockT.On("ToHA", mock.MatchedBy(func(st *model.DeviceState) bool {
+		return st.On && st.Bri == 127 && st.UpdatedByBri
+	}), vd).Return(cmd).Once()
+	mockHA.On("SetState", mock.Anything, mock.Anything, cmd).Return(nil).Once()
+
+	s := NewBridgeService(mockHA, new(MockConfigRepo), mockTF)
+	state := &model.DeviceState{Bri: 127, UpdatedByBri: true, On: false}
+	assert.NoError(t, s.TestDeviceAction(context.Background(), vd, state))
+
+	assert.False(t, state.On, "caller state must not be modified")
+	mockT.AssertExpectations(t)
+	mockHA.AssertExpectations(t)
+}
+
+func TestTestDeviceAction_NilInputs(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockTF := new(MockTranslatorFactory)
+	s := NewBridgeService(mockHA, new(MockConfigRepo), mockTF)
+	vd := &model.VirtualDevice{EntityID: "light.test", Type: model.MappingTypeLight}
+
+	err := s.TestDeviceAction(context.Background(), nil, &model.DeviceState{})
+	assert.ErrorIs(t, err, model.ErrInvalidTestRequest)
+	err = s.TestDeviceAction(context.Background(), vd, nil)
+	assert.ErrorIs(t, err, model.ErrInvalidTestRequest)
+
+	mockHA.AssertNotCalled(t, "SetState", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestTestDeviceAction_UsesFormEntity(t *testing.T) {
+	mockHA := new(MockHAPort)
+	mockTF := new(MockTranslatorFactory)
+	mockT := new(MockTranslator)
+	vd := &model.VirtualDevice{Name: "S", EntityID: "switch.new", Type: model.MappingTypeLight}
+
+	mockTF.On("GetTranslator", model.MappingTypeLight).Return(mockT)
+	mockT.On("ToHA", mock.Anything, mock.Anything).Return(model.HomeAssistantCommand{Service: "turn_on"})
+	mockHA.On("SetState", mock.Anything, mock.MatchedBy(func(d *model.Device) bool {
+		return d.ExternalID == "switch.new"
+	}), mock.Anything).Return(nil).Once()
+
+	s := NewBridgeService(mockHA, new(MockConfigRepo), mockTF)
+	assert.NoError(t, s.TestDeviceAction(context.Background(), vd, &model.DeviceState{On: true}))
 	mockHA.AssertExpectations(t)
 }
 
@@ -574,7 +648,7 @@ func TestBridgeService_WorkerPoolLimit(t *testing.T) {
 
 	// Test TestDeviceAction limit
 	err = s.TestDeviceAction(context.Background(), vd, &model.DeviceState{On: true})
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, model.ErrTooManyRequests)
 	assert.Contains(t, err.Error(), "too many concurrent requests")
 
 	// Drain the semaphore

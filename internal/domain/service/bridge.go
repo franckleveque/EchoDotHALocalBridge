@@ -57,34 +57,42 @@ func (s *BridgeService) Start(ctx context.Context) {
 	}()
 }
 
+// TestDeviceAction runs a one-off HA call synchronously (10 s timeout) and returns
+// the HA port error unchanged, so callers can inspect it with errors.As.
 func (s *BridgeService) TestDeviceAction(ctx context.Context, vd *model.VirtualDevice, state *model.DeviceState) error {
+	if vd == nil || state == nil {
+		return model.ErrInvalidTestRequest
+	}
+
+	// Work on a copy: the caller's state must not be modified.
+	stateCopy := *state
+	if stateCopy.UpdatedByBri {
+		stateCopy.On = true
+	}
+
+	select {
+	case s.workerSem <- struct{}{}:
+		defer func() { <-s.workerSem }()
+	default:
+		return model.ErrTooManyRequests
+	}
+
 	// Create a dummy device for SetState
 	dummyDevice := &model.Device{
 		ID:            "test",
 		Name:          vd.Name,
 		Type:          vd.Type,
 		ExternalID:    vd.EntityID,
-		State:         state,
+		State:         &stateCopy,
 		VirtualDevice: vd,
 	}
 
 	t := s.translatorFactory.GetTranslator(vd.Type)
-	cmd := t.ToHA(state, vd)
+	cmd := t.ToHA(&stateCopy, vd)
 
-	select {
-	case s.workerSem <- struct{}{}:
-		go func() {
-			defer func() { <-s.workerSem }()
-			err := s.haPort.SetState(context.Background(), dummyDevice, cmd)
-			if err != nil {
-				slog.Error("Error setting HA test state", "error", err)
-			}
-		}()
-	default:
-		return fmt.Errorf("too many concurrent requests, please try again later")
-	}
-
-	return nil
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return s.haPort.SetState(ctx, dummyDevice, cmd)
 }
 
 func (s *BridgeService) RefreshDevices(ctx context.Context) error {
