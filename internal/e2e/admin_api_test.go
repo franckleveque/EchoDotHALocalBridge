@@ -253,6 +253,32 @@ func TestAdminTestAction_DimSendsTurnOn(t *testing.T) {
 	assert.EqualValues(t, 127, call.Payload["brightness"])
 }
 
+// The entity chosen in the form must be the one Home Assistant receives, whatever
+// the mapping type (bug report: light.* replaced by a switch.* entity).
+func TestAdminTestAction_ReachesSwitchEntityForEveryType(t *testing.T) {
+	const sw = "switch.intlumieresalleamanger"
+	cases := map[string]string{
+		"light": `{"virtual_device":{"name":"T","entity_id":"` + sw + `","type":"light"},"state_update":{"on":true}}`,
+		"custom": `{"virtual_device":{"name":"T","entity_id":"` + sw + `","type":"custom","action_config":` +
+			`{"on_service":"switch.turn_on","on_payload":{"entity_id":"` + sw + `"}}},"state_update":{"on":true}}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			ha := newFakeHA(t, nil)
+			ts := newTestStack(t, ha, nil)
+			setupAdmin(t, ts.URL)
+
+			code, _ := postTestAction(t, ts.URL, body)
+			assert.Equal(t, http.StatusOK, code)
+			assert.Equal(t, 1, ha.callCount())
+			call := ha.lastCall()
+			assert.Equal(t, "switch", call.Domain)
+			assert.Equal(t, "turn_on", call.Service)
+			assert.Equal(t, sw, call.Payload["entity_id"])
+		})
+	}
+}
+
 func TestAdminTestAction_BadBody400(t *testing.T) {
 	ha := newFakeHA(t, nil)
 	ts := newTestStack(t, ha, nil)
