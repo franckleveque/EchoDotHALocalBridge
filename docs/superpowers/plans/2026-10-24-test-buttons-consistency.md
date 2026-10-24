@@ -16,7 +16,9 @@
 
 - L'API Hue vue par Alexa reste asynchrone (`UpdateDeviceState` inchangé). Seul `TestDeviceAction` devient synchrone, timeout 10 s.
 - Hexagonal et `make test` comme dans le plan 1 ; couverture > 80 % dans `internal/domain/service`.
-- Erreur HA renvoyée en `502` avec le corps texte `HA API error: <code>: <corps>` ; entrée invalide en `400` ; trop de requêtes concurrentes en `429` ; autres erreurs en `500`.
+- Statuts de `/admin/test-action` : erreur HA (`*model.HAAPIError`), erreur réseau ou timeout en `502` avec le corps texte de l'erreur (`HA API error: <code>: <corps>` pour HA) ; `model.ErrTooManyRequests` en `429` ; `model.ErrInvalidTestRequest` ou corps invalide en `400` ; le reste en `500`.
+- `model.ErrTooManyRequests` et `model.ErrInvalidTestRequest` sont des erreurs sentinelles du domaine (`errors.Is`), à créer dans `internal/domain/model/hacall.go`. Le message de concurrence existant est conservé.
+- L'ancienne route `PUT /api/admin/lights/{id}/state` n'est pas supprimée.
 - Message de succès : `Home Assistant accepted the call on <entity_id>`. Interface en anglais. Pas de tiret cadratin.
 - Une ligne est « non enregistrée » si elle n'a pas de `hue_id` ou si son JSON diffère de la version enregistrée du même `hue_id`.
 
@@ -37,7 +39,7 @@
 - Test: `internal/domain/service/bridge_test.go` (remplacer les cas async autour des l.489-580)
 
 **Interfaces:**
-- Produces: `TestDeviceAction(ctx, vd *model.VirtualDevice, state *model.DeviceState) error` : renvoie `ports`-level error du port HA tel quel (donc `*model.HAAPIError` via `errors.As`) ; `vd == nil` ou `state == nil` → erreur `invalid test request`. Si `state.UpdatedByBri`, l'état envoyé au traducteur a `On=true` (comme `UpdateDeviceState`). L'état passé en argument n'est pas modifié. Si le sémaphore est plein : erreur `too many concurrent requests, please try again later` (message existant).
+- Produces: `TestDeviceAction(ctx, vd *model.VirtualDevice, state *model.DeviceState) error` : renvoie `ports`-level error du port HA tel quel (donc `*model.HAAPIError` via `errors.As`) ; `vd == nil` ou `state == nil` → `model.ErrInvalidTestRequest`. Si `state.UpdatedByBri`, l'état envoyé au traducteur a `On=true` (comme `UpdateDeviceState`). L'état passé en argument n'est pas modifié. Si le sémaphore est plein : `model.ErrTooManyRequests` (message `too many concurrent requests, please try again later`).
 
 - [ ] **Step 1: Tests qui échouent** (mock `MockHAPort` existant) :
   - `TestTestDeviceAction_ReturnsHAError` : le mock `SetState` renvoie `&model.HAAPIError{Status:400, Body:"nope"}` → l'appel retourne cette erreur (`errors.As`), et `SetState` a été appelé avant le retour.
@@ -67,7 +69,7 @@
   - e2e `TestAdminTestAction_DimSendsTurnOn` : `{"bri":127}` sur une entité `light.x` → dernier appel HA `light/turn_on` avec `brightness` 127.
   - e2e `TestAdminTestAction_BadBody400` : JSON sans `virtual_device` → `400`.
 - [ ] **Step 2: Lancer** `go test ./internal/adapters/input/http` et `go test -tags e2e ./internal/e2e -run AdminTestAction` → FAIL.
-- [ ] **Step 3: Implémenter** `parseStateUpdate`, refactorer le handler Hue pour l'utiliser, adapter le handler admin avec la table de statuts des Global Constraints (`errors.As` sur `*model.HAAPIError` → 502 ; message de concurrence → 429).
+- [ ] **Step 3: Implémenter** `parseStateUpdate`, refactorer le handler Hue pour l'utiliser, adapter le handler admin avec la table de statuts des Global Constraints (`errors.As` sur `*model.HAAPIError` → 502 ; `errors.Is` pour les deux sentinelles ; toute autre erreur issue de `SetState` ou du timeout → 502).
 - [ ] **Step 4: Lancer** `make test && go test -race -tags e2e ./...` → PASS (les tests Hue existants garantissent que l'API Alexa n'a pas changé).
 - [ ] **Step 5: Commit** `fix: return HA errors from /admin/test-action and share state parsing`
 

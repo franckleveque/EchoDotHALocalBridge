@@ -21,6 +21,7 @@
 
 ## Review Focus
 
+- Payload du Custom : l'entrée journalisée contient ce qui part réellement vers HA, `"value":0` compris (test sur le payload enregistré).
 - Corps d'erreur HA contenant `<script>` ou du HTML : affiché comme texte brut (test sur le HTML servi : pas d'`innerHTML` pour ces champs).
 - Corps d'erreur très gros (> 2 Ko) : tronqué, pas d'explosion mémoire.
 - Appels concurrents (10 workers) vers le tampon : pas de data race (`go test -race`).

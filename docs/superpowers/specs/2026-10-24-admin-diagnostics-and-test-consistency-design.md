@@ -48,6 +48,12 @@ Mes choix, à relire :
 - Erreur HA renvoyée au navigateur en `502` avec le texte `HA API error: <code>: <corps>`.
 - Pages `/admin/logs` (HTML) et `/admin/logs/data` (JSON), derrière `withBasicAuth`. Rendu des valeurs via `textContent` (le corps vient de HA).
 - Interface en anglais, comme l'existant.
+- Le bug de luminosité (`UpdatedByBri`) est dans le périmètre : faire passer le tableau par `/admin/test-action` le casserait, car il fonctionne aujourd'hui via la route Hue. Correctif : un analyseur d'état partagé (`on`, `bri` impliquant `UpdatedByBri`), et `TestDeviceAction` met `On=true` quand `UpdatedByBri`, comme `UpdateDeviceState`. Le tag JSON du modèle ne change pas (l'API Hue est inchangée).
+- Le bouton du tableau envoie l'appareil complet de la ligne tel qu'affiché dans la config du navigateur. L'ancienne route `PUT /api/admin/lights/{id}/state` reste en place (utilisée par les tests e2e), la page ne l'appelle plus. `/admin/test-action` n'actualise pas le cache d'état du pont ; le tableau n'affiche pas d'état on/off, rien à rafraîchir.
+- Statuts HTTP de `/admin/test-action` : erreur HA, erreur réseau ou timeout 10 s en `502` ; trop de requêtes concurrentes en `429` ; corps invalide ou `virtual_device` / `state_update` absent en `400` ; le reste en `500`.
+- Journal : tous les appels de service HA y passent, y compris ceux déclenchés par Alexa. Échec sans réponse HTTP : entrée avec `Error` et `Status` 0. Le payload enregistré est celui réellement envoyé (donc avec le `"value":0` du Custom), complet, sans rédaction (données de service définies par l'utilisateur ; le jeton n'y figure jamais).
+- Repère « non enregistré » : par ligne, comparé à la version enregistrée du même `hue_id` ; toute ligne sans `hue_id` est non enregistrée ; il disparaît après un Save réussi.
+- Tests : tests Go (service, handlers, e2e) plus une vérification navigateur jetable (Playwright), non commitée.
 
 ```mermaid
 flowchart LR
