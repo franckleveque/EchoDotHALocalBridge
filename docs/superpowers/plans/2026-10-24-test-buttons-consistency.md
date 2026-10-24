@@ -36,7 +36,7 @@
 
 **Files:**
 - Modify: `internal/domain/service/bridge.go:60-88` (`TestDeviceAction`), `internal/domain/model/hacall.go` (ajout des deux sentinelles)
-- Test: `internal/domain/service/bridge_test.go` (remplacer les cas async autour des l.489-580)
+- Test: `internal/domain/service/bridge_test.go` (remplacer les cas async de `TestBridgeService_TestDeviceAction`, l.489-535 : le cas 3 « Error in SetState » attend désormais l'erreur retournée, plus de `time.Sleep` ; le test `TestBridgeService_WorkerPoolLimit` l.575 doit continuer à passer)
 
 **Interfaces:**
 - Produces: `TestDeviceAction(ctx, vd *model.VirtualDevice, state *model.DeviceState) error` : renvoie `ports`-level error du port HA tel quel (donc `*model.HAAPIError` via `errors.As`) ; `vd == nil` ou `state == nil` → `model.ErrInvalidTestRequest`. Si `state.UpdatedByBri`, l'état envoyé au traducteur a `On=true` (comme `UpdateDeviceState`). L'état passé en argument n'est pas modifié. Si le sémaphore est plein : `model.ErrTooManyRequests` (message `too many concurrent requests, please try again later`).
@@ -57,7 +57,7 @@
 **Files:**
 - Modify: `internal/adapters/input/http/admin_handlers.go:147-172` (`handleAdminTestAction`), `internal/adapters/input/http/hue_handlers.go:~138-155`
 - Create: `internal/adapters/input/http/state_parse.go`
-- Test: `internal/adapters/input/http/state_parse_test.go`, `internal/e2e/admin_api_test.go`
+- Test: `internal/adapters/input/http/state_parse_test.go`, `internal/e2e/admin_api_test.go` (nouveaux tests ; adapter aussi `TestAdminLogs_ShowsFailedHACall` du plan 1 : le POST `/admin/test-action` avec un HA qui répond 400 renvoie désormais `502` au lieu de `200`, garder l'assertion sur les logs)
 
 **Interfaces:**
 - Produces: `parseStateUpdate(raw map[string]any) *model.DeviceState` : `on` (bool) → `On` ; `bri` (nombre) → `Bri` et `UpdatedByBri=true`. Utilisée par le handler Hue (remplace le bloc dupliqué) et par `handleAdminTestAction` (le champ `state_update` est décodé en `map[string]any`).
