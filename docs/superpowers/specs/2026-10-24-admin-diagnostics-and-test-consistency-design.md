@@ -54,6 +54,8 @@ Mes choix, à relire :
 - Le bouton du tableau envoie l'appareil complet de la ligne tel qu'affiché dans la config du navigateur. L'ancienne route `PUT /api/admin/lights/{id}/state` reste en place (utilisée par les tests e2e), la page ne l'appelle plus. `/admin/test-action` n'actualise pas le cache d'état du pont ; le tableau n'affiche pas d'état on/off, rien à rafraîchir.
 - Statuts HTTP de `/admin/test-action` : erreur HA, erreur réseau ou timeout 10 s en `502` ; trop de requêtes concurrentes en `429` ; corps invalide ou `virtual_device` / `state_update` absent en `400` ; le reste en `500`.
 - Journal : tous les appels de service HA y passent, y compris ceux déclenchés par Alexa. Échec sans réponse HTTP : ligne d'erreur avec l'URL. Le payload journalisé est celui réellement envoyé (donc avec le `"value":0` du Custom), complet, sans rédaction (données de service définies par l'utilisateur ; le jeton n'y figure jamais).
+- No-Op : les boutons de test respectent les options « No-Op for ON/OFF » (comme le chemin Alexa). Dans ce cas rien n'est envoyé à HA ; `/admin/test-action` répond `409` avec `no-op configured for this action: nothing sent to Home Assistant` et la page affiche `Not sent: ...` (jamais un message de succès). Pour tester l'appel HA d'un tel appareil, décocher l'option No-Op.
+- Retour visuel : message `Sending to Home Assistant...` pendant l'appel ; les messages `Error:` et `Not sent:` restent affichés 10 s.
 - Repère « non enregistré » : par ligne, comparé à la version enregistrée du même `hue_id` ; toute ligne sans `hue_id` est non enregistrée ; il disparaît après un Save réussi.
 - Tests : tests Go (service, handlers, e2e) plus une vérification navigateur jetable (Playwright), non commitée.
 
