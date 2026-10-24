@@ -24,6 +24,7 @@ type Server struct {
 	ip          string
 	setupLimiter map[string]time.Time
 	limiterMu    sync.Mutex
+	logs         ports.LogSource
 }
 
 func NewServer(hue ports.HueEmulationPort, admin ports.AdminPort, authService ports.AuthService, ip string) *Server {
@@ -34,6 +35,12 @@ func NewServer(hue ports.HueEmulationPort, admin ports.AdminPort, authService po
 		ip:           ip,
 		setupLimiter: make(map[string]time.Time),
 	}
+}
+
+// SetLogSource configures the source of recent log lines. Without one, log
+// readers behave like an empty buffer.
+func (s *Server) SetLogSource(src ports.LogSource) {
+	s.logs = src
 }
 
 func (s *Server) Mux() *http.ServeMux {

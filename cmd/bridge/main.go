@@ -6,6 +6,7 @@ import (
 	"hue-bridge-emulator/internal/adapters/input/ssdp"
 	"hue-bridge-emulator/internal/domain/model"
 	"hue-bridge-emulator/internal/adapters/output/homeassistant"
+	"hue-bridge-emulator/internal/adapters/output/logging"
 	"hue-bridge-emulator/internal/adapters/output/persistence"
 	"hue-bridge-emulator/internal/domain/service"
 	"hue-bridge-emulator/internal/domain/translator"
@@ -29,7 +30,8 @@ func main() {
 	default:
 		levelVar.Set(slog.LevelInfo)
 	}
-	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: levelVar})
+	ring := logging.NewLineRing(500, 4096)
+	handler := logging.NewHandler(os.Stdout, ring, levelVar)
 	slog.SetDefault(slog.New(handler))
 
 	ip := os.Getenv("LOCAL_IP")
@@ -114,6 +116,7 @@ func main() {
 		port = "80"
 	}
 	httpServer := http.NewServer(bridgeService, bridgeService, authService, ip)
+	httpServer.SetLogSource(ring)
 	slog.Info("HTTP Server listening", "address", "0.0.0.0:"+port)
 	if err := httpServer.ListenAndServe(":"+port); err != nil {
 		slog.Error("HTTP Server error", "error", err)
