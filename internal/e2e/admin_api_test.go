@@ -175,7 +175,7 @@ func TestAdminLogs_ShowsFailedHACall(t *testing.T) {
 	resp, err := http.DefaultClient.Do(req)
 	assert.NoError(t, err)
 	resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, http.StatusBadGateway, resp.StatusCode)
 
 	assert.Eventually(t, func() bool {
 		r, err := http.NewRequest(http.MethodGet, ts.URL+"/admin/logs/data", nil)
@@ -199,4 +199,66 @@ func TestAdminLogs_ShowsFailedHACall(t *testing.T) {
 		}
 		return false
 	}, 3*time.Second, 50*time.Millisecond)
+}
+
+func postTestAction(t *testing.T, base, payload string) (int, string) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, base+"/admin/test-action", strings.NewReader(payload))
+	req.SetBasicAuth("admin", "password123")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+const testActionDevice = `"virtual_device":{"hue_id":"1","name":"T","entity_id":"light.x","type":"light"}`
+
+func TestAdminTestAction_HAError502(t *testing.T) {
+	ha := newFakeHA(t, nil)
+	ha.failStatus = http.StatusBadRequest
+	ha.failBody = `{"message":"Service not found."}`
+	ts := newTestStack(t, ha, nil)
+	setupAdmin(t, ts.URL)
+
+	code, body := postTestAction(t, ts.URL, `{`+testActionDevice+`,"state_update":{"on":true}}`)
+	assert.Equal(t, http.StatusBadGateway, code)
+	assert.Contains(t, body, "400")
+	assert.Contains(t, body, "Service not found.")
+}
+
+func TestAdminTestAction_Success200AfterHAAccepts(t *testing.T) {
+	ha := newFakeHA(t, nil)
+	ts := newTestStack(t, ha, nil)
+	setupAdmin(t, ts.URL)
+
+	code, _ := postTestAction(t, ts.URL, `{`+testActionDevice+`,"state_update":{"on":true}}`)
+	assert.Equal(t, http.StatusOK, code)
+	assert.Equal(t, 1, ha.callCount())
+}
+
+func TestAdminTestAction_DimSendsTurnOn(t *testing.T) {
+	ha := newFakeHA(t, nil)
+	ts := newTestStack(t, ha, nil)
+	setupAdmin(t, ts.URL)
+
+	code, _ := postTestAction(t, ts.URL, `{`+testActionDevice+`,"state_update":{"bri":127}}`)
+	assert.Equal(t, http.StatusOK, code)
+	call := ha.lastCall()
+	assert.Equal(t, "light", call.Domain)
+	assert.Equal(t, "turn_on", call.Service)
+	assert.EqualValues(t, 127, call.Payload["brightness"])
+}
+
+func TestAdminTestAction_BadBody400(t *testing.T) {
+	ha := newFakeHA(t, nil)
+	ts := newTestStack(t, ha, nil)
+	setupAdmin(t, ts.URL)
+
+	code, _ := postTestAction(t, ts.URL, `{"state_update":{"on":true}}`)
+	assert.Equal(t, http.StatusBadRequest, code)
+	assert.Equal(t, 0, ha.callCount())
 }

@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hue-bridge-emulator/internal/domain/model"
 	"net/http"
@@ -152,17 +153,32 @@ func (s *Server) handleAdminTestAction(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		VirtualDevice *model.VirtualDevice `json:"virtual_device"`
-		StateUpdate   *model.DeviceState   `json:"state_update"`
+		StateUpdate   map[string]any       `json:"state_update"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if req.VirtualDevice == nil || req.StateUpdate == nil {
+		http.Error(w, model.ErrInvalidTestRequest.Error(), http.StatusBadRequest)
+		return
+	}
 
-	err := s.admin.TestDeviceAction(r.Context(), req.VirtualDevice, req.StateUpdate)
+	err := s.admin.TestDeviceAction(r.Context(), req.VirtualDevice, parseStateUpdate(req.StateUpdate))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		var haErr *model.HAAPIError
+		switch {
+		case errors.Is(err, model.ErrInvalidTestRequest):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		case errors.Is(err, model.ErrTooManyRequests):
+			http.Error(w, err.Error(), http.StatusTooManyRequests)
+		case errors.As(err, &haErr):
+			http.Error(w, err.Error(), http.StatusBadGateway)
+		default:
+			// Network errors and timeouts: Home Assistant is the upstream.
+			http.Error(w, err.Error(), http.StatusBadGateway)
+		}
 		return
 	}
 
