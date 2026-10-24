@@ -15,14 +15,17 @@ import (
 	"hue-bridge-emulator/internal/domain/translator"
 	"io"
 	"log/slog"
-	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
+
+// nextClientIP numbers the synthetic client addresses handed to test requests.
+var nextClientIP atomic.Uint32
 
 // fakeHA simulates the Home Assistant REST API.
 type fakeHA struct {
@@ -159,8 +162,9 @@ func newTestStack(t *testing.T, ha *fakeHA, cfg *model.Config) *httptest.Server 
 	srv.SetLogSource(ring)
 	mux := srv.Mux()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Bypass rate limiter by using a random RemoteAddr
-		r.RemoteAddr = fmt.Sprintf("127.0.0.%d:1234", rand.Intn(254)+1)
+		// Bypass the per-IP rate limiter: every request gets its own address.
+		n := nextClientIP.Add(1)
+		r.RemoteAddr = fmt.Sprintf("10.%d.%d.%d:1234", (n>>16)&0xff, (n>>8)&0xff, n&0xff)
 		mux.ServeHTTP(w, r)
 	}))
 	t.Cleanup(ts.Close)

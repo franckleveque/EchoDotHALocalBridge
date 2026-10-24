@@ -262,3 +262,18 @@ func TestAdminTestAction_BadBody400(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, code)
 	assert.Equal(t, 0, ha.callCount())
 }
+
+// The setup rate limiter is keyed by client IP, so the test stack must hand every
+// request its own address; a random pick from a small pool collides and flakes.
+func TestTestStack_RequestsNeverHitSetupRateLimiter(t *testing.T) {
+	ts := newTestStack(t, nil, nil)
+
+	for i := 0; i < 600; i++ {
+		resp, err := http.Get(ts.URL + "/admin/setup")
+		assert.NoError(t, err)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("request %d got %d, want 200 (limiter hit by a repeated client IP)", i, resp.StatusCode)
+		}
+	}
+}
