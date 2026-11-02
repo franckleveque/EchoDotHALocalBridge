@@ -23,31 +23,6 @@ type JSONConfigRepository struct {
 	defaultKey []byte
 }
 
-// Internal structure for migration
-type legacyConfig struct {
-	HassURL        string                           `json:"hass_url"`
-	HassToken      string                           `json:"hass_token"`
-	EntityMappings map[string]*legacyEntityMapping `json:"entity_mappings"`
-}
-
-type legacyEntityMapping struct {
-	EntityID      string               `json:"entity_id"`
-	HueID         string               `json:"hue_id"`
-	Name          string               `json:"name"`
-	Type          model.MappingType    `json:"type"`
-	Exposed       bool                 `json:"exposed"`
-	CustomFormula *legacyCustomFormula `json:"custom_formula,omitempty"`
-}
-
-type legacyCustomFormula struct {
-	ToHueFormula string `json:"to_hue_formula"`
-	ToHAFormula  string `json:"to_ha_formula"`
-	OnService    string `json:"on_service"`
-	OffService   string `json:"off_service"`
-	OnEffect     string `json:"on_effect"`
-	OffEffect    string `json:"off_effect"`
-}
-
 func NewJSONConfigRepository(filepath string) *JSONConfigRepository {
 	// Static key for token encryption. Can be overridden via HUE_ENCRYPTION_KEY env var.
 	defaultKey := []byte("a-very-secret-key-32-chars-long!")

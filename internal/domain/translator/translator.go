@@ -9,7 +9,3 @@ type Translator interface {
 	ToHA(hueState *model.DeviceState, vd *model.VirtualDevice) model.HomeAssistantCommand
 	GetMetadata() model.HueMetadata
 }
-
-type TranslatorFactory interface {
-	GetTranslator(mappingType model.MappingType) Translator
-}

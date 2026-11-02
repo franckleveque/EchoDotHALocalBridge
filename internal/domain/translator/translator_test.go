@@ -265,9 +265,9 @@ func TestCustomStrategy_Evaluate(t *testing.T) {
 	assert.Equal(t, 10.0, s.evaluate("x * 2", 5))
 	assert.Equal(t, 5.0, s.evaluate("x / 2", 10))
 	assert.Equal(t, 5.0, s.evaluate("invalid syntax (", 5)) // Parser error
-	assert.Equal(t, 5.0, s.evaluate("x + y", 5))           // Eval error (y missing)
-	assert.Equal(t, 5.0, s.evaluate("1 == 1", 5))         // Bool return
-	assert.Equal(t, 5.0, s.evaluate("'string'", 5))       // String return
+	assert.Equal(t, 5.0, s.evaluate("x + y", 5))            // Eval error (y missing)
+	assert.Equal(t, 5.0, s.evaluate("1 == 1", 5))           // Bool return
+	assert.Equal(t, 5.0, s.evaluate("'string'", 5))         // String return
 }
 
 func TestMetadata(t *testing.T) {
