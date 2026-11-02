@@ -180,10 +180,10 @@ func getLocalIP(logger *slog.Logger, preferredNet string) string {
 func ipv4FromAddr(addr net.Addr) string {
 	host, _, _ := strings.Cut(addr.String(), "/")
 	ip := net.ParseIP(host)
-	if ip == nil || ip.IsLoopback() {
+	if ip == nil || ip.IsLoopback() { // nosemgrep: demeter-chain net: net.IP methods on the parsed address
 		return ""
 	}
-	ip = ip.To4()
+	ip = ip.To4() // nosemgrep: demeter-chain net: net.IP methods on the parsed address
 	if ip == nil {
 		return ""
 	}

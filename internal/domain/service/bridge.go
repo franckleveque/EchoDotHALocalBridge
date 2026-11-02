@@ -314,7 +314,7 @@ func (s *BridgeService) UpdateConfig(ctx context.Context, cfg *model.Config) err
 
 	// Force refresh
 	s.mu.Lock()
-	s.lastRefresh = time.Now().Add(-5 * time.Second) // Ensure we can refresh
+	s.lastRefresh = time.Now().Add(-5 * time.Second) // nosemgrep: demeter-chain time: Time.Add on time.Now result. Ensure we can refresh
 	s.mu.Unlock()
 
 	// We don't want to fail the whole update if Home Assistant is currently unreachable

@@ -88,7 +88,7 @@ func (s *Server) withBasicAuth(next http.Handler) http.Handler {
 		u, p, ok := r.BasicAuth()
 		if !ok {
 			s.logger.Debug("HTTP: no basic auth credentials", "path", r.URL.Path, "from", r.RemoteAddr)
-			w.Header().Set("WWW-Authenticate", `Basic realm="restricted", charset="UTF-8"`)
+			w.Header().Set("WWW-Authenticate", `Basic realm="restricted", charset="UTF-8"`) // nosemgrep: demeter-chain net/http: response headers are only reachable through ResponseWriter.Header()
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -102,7 +102,7 @@ func (s *Server) withBasicAuth(next http.Handler) http.Handler {
 
 		if !ok {
 			s.logger.Warn("HTTP: invalid credentials", "path", r.URL.Path, "from", r.RemoteAddr, "username", u)
-			w.Header().Set("WWW-Authenticate", `Basic realm="restricted", charset="UTF-8"`)
+			w.Header().Set("WWW-Authenticate", `Basic realm="restricted", charset="UTF-8"`) // nosemgrep: demeter-chain net/http: response headers are only reachable through ResponseWriter.Header()
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -128,7 +128,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDescription(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/xml")
+	w.Header().Set("Content-Type", "text/xml") // nosemgrep: demeter-chain net/http: response headers are only reachable through ResponseWriter.Header()
 	fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8" ?>
 <root xmlns="urn:schemas-upnp-org:device-1-0">
 <specVersion>
@@ -153,7 +153,7 @@ func (s *Server) handleDescription(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeJSON(w http.ResponseWriter, data interface{}) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8") // nosemgrep: demeter-chain net/http: response headers are only reachable through ResponseWriter.Header()
 	encoder := json.NewEncoder(w)
 	encoder.SetEscapeHTML(false)
 	encoder.Encode(data)

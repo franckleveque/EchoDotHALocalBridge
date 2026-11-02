@@ -69,7 +69,7 @@ const (
 // body, logs it and returns a *model.HAAPIError. The caller must close the
 // returned response body when the error is nil.
 func (c *Client) do(req *http.Request, op string) (*http.Response, error) {
-	url := req.URL.Redacted()
+	url := req.URL.Redacted() // nosemgrep: demeter-chain net/url: Request.URL is a framework *url.URL
 	start := time.Now()
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -80,9 +80,9 @@ func (c *Client) do(req *http.Request, op string) (*http.Response, error) {
 	if op == opStates {
 		level = slog.LevelDebug
 	}
-	c.logger.Log(req.Context(), level, "HA API Response", "op", op, "url", url, "status", resp.StatusCode, "duration_ms", time.Since(start).Milliseconds())
+	c.logger.Log(req.Context(), level, "HA API Response", "op", op, "url", url, "status", resp.StatusCode, "duration_ms", time.Since(start).Milliseconds()) // nosemgrep: demeter-chain time: Duration.Milliseconds on time.Since result
 	if resp.StatusCode >= 400 {
-		defer resp.Body.Close()
+		defer resp.Body.Close() // nosemgrep: demeter-chain net/http: Response.Body must be closed by the caller
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 		body := string(raw)
 		c.logger.Error("HA API Error", "op", op, "url", url, "status", resp.StatusCode, "body", body)
@@ -105,13 +105,13 @@ func (c *Client) GetRawStates(ctx context.Context) ([]model.HAEntityState, error
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", "Bearer "+token) // nosemgrep: demeter-chain net/http: Request.Header is an http.Header
 
 	resp, err := c.do(req, opStates)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() // nosemgrep: demeter-chain net/http: Response.Body must be closed by the caller
 
 	type haState struct {
 		EntityID   string         `json:"entity_id"`
@@ -176,14 +176,14 @@ func (c *Client) SetState(ctx context.Context, device *model.Device, cmd model.H
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)   // nosemgrep: demeter-chain net/http: Request.Header is an http.Header
+	req.Header.Set("Content-Type", "application/json") // nosemgrep: demeter-chain net/http: Request.Header is an http.Header
 
 	resp, err := c.do(req, opServiceCall)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() // nosemgrep: demeter-chain net/http: Response.Body must be closed by the caller
 
 	// Handle custom effects if provided
 	if cmd.Effect != "" {
@@ -205,11 +205,11 @@ func (c *Client) executeEffect(ctx context.Context, effect, urlBase, token strin
 		c.logger.Error("Failed to create request for effect", "error", err, "url", redactURL(url))
 		return
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", "Bearer "+token) // nosemgrep: demeter-chain net/http: Request.Header is an http.Header
 	c.logger.Info("HA Effect Call", "url", redactURL(url))
 	resp, err := c.do(req, opEffect)
 	if err != nil {
 		return
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() // nosemgrep: demeter-chain net/http: Response.Body must be closed by the caller
 }

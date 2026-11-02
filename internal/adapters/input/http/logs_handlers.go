@@ -29,7 +29,7 @@ func (h *LogsHandlers) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8") // nosemgrep: demeter-chain net/http: response headers are only reachable through ResponseWriter.Header()
 	w.Write([]byte(adminLogsHTML))
 }
 
@@ -45,8 +45,8 @@ func (h *LogsHandlers) handleLogsData(w http.ResponseWriter, r *http.Request) {
 			lines = l
 		}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json") // nosemgrep: demeter-chain net/http: response headers are only reachable through ResponseWriter.Header()
+	w.Header().Set("Cache-Control", "no-store")        // nosemgrep: demeter-chain net/http: response headers are only reachable through ResponseWriter.Header()
 	json.NewEncoder(w).Encode(lines)
 }
 

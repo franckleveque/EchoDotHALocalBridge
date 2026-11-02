@@ -75,7 +75,7 @@ func (h *AdminHandlers) withSetupGuard(next http.Handler) http.Handler {
 }
 
 func (h *AdminHandlers) handleAdminSetupPage(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8") // nosemgrep: demeter-chain net/http: response headers are only reachable through ResponseWriter.Header()
 	fmt.Fprint(w, adminSetupHTML)
 }
 
@@ -104,7 +104,7 @@ func (h *AdminHandlers) handleAdminSetupSubmit(w http.ResponseWriter, r *http.Re
 }
 
 func (h *AdminHandlers) handleAdmin(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8") // nosemgrep: demeter-chain net/http: response headers are only reachable through ResponseWriter.Header()
 	fmt.Fprint(w, adminHTML)
 }
 
@@ -167,10 +167,10 @@ func (h *AdminHandlers) handleHAEntities(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *AdminHandlers) getClientIP(r *http.Request) string {
-	if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
+	if xrip := r.Header.Get("X-Real-IP"); xrip != "" { // nosemgrep: demeter-chain net/http: Request.Header is an http.Header
 		return xrip
 	}
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" { // nosemgrep: demeter-chain net/http: Request.Header is an http.Header
 		parts := strings.Split(xff, ",")
 		return strings.TrimSpace(parts[0])
 	}
