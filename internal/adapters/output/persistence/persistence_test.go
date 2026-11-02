@@ -60,3 +60,18 @@ func TestJSONConfigRepository_NewFormat(t *testing.T) {
 	assert.Len(t, loaded.VirtualDevices, 1)
 	assert.Equal(t, "Test", loaded.VirtualDevices[0].Name)
 }
+
+func TestSelectKeySize(t *testing.T) {
+	cases := map[int]int{40: 32, 32: 32, 28: 24, 24: 24, 20: 16, 16: 16, 10: 0, 0: 0}
+	for n, want := range cases {
+		assert.Equal(t, want, selectKeySize(n), "n=%d", n)
+	}
+}
+
+func TestNewJSONConfigRepository_KeyFromEnv(t *testing.T) {
+	t.Setenv("HUE_ENCRYPTION_KEY", "0123456789abcdefghijklmnopq") // 27 chars -> 24
+	assert.Equal(t, []byte("0123456789abcdefghijklmn"), NewJSONConfigRepository("x").key)
+	t.Setenv("HUE_ENCRYPTION_KEY", "short")
+	r := NewJSONConfigRepository("x")
+	assert.Equal(t, r.defaultKey, r.key)
+}

@@ -23,28 +23,33 @@ type JSONConfigRepository struct {
 	defaultKey []byte
 }
 
+// aesKeySizes lists the valid AES key sizes, largest first.
+var aesKeySizes = []int{32, 24, 16}
+
+// selectKeySize returns the largest AES key size that fits in n bytes, or 0.
+func selectKeySize(n int) int {
+	for _, size := range aesKeySizes {
+		if size <= n {
+			return size
+		}
+	}
+	return 0
+}
+
 func NewJSONConfigRepository(filepath string) *JSONConfigRepository {
 	// Static key for token encryption. Can be overridden via HUE_ENCRYPTION_KEY env var.
 	defaultKey := []byte("a-very-secret-key-32-chars-long!")
 	key := defaultKey
 	if envKey := os.Getenv("HUE_ENCRYPTION_KEY"); envKey != "" {
-		if len(envKey) >= 32 {
-			key = []byte(envKey[:32])
-			if len(envKey) > 32 {
-				slog.Warn("HUE_ENCRYPTION_KEY is longer than 32 characters and will be truncated.")
-			}
-		} else if len(envKey) >= 24 {
-			key = []byte(envKey[:24])
-			if len(envKey) > 24 {
-				slog.Warn("HUE_ENCRYPTION_KEY is between 24 and 31 characters and will be truncated to 24.")
-			}
-		} else if len(envKey) >= 16 {
-			key = []byte(envKey[:16])
-			if len(envKey) > 16 {
-				slog.Warn("HUE_ENCRYPTION_KEY is between 16 and 23 characters and will be truncated to 16.")
-			}
-		} else {
+		size := selectKeySize(len(envKey))
+		if size == 0 {
 			slog.Warn("HUE_ENCRYPTION_KEY is too short (min 16 chars). Using default key.")
+		}
+		if size > 0 {
+			key = []byte(envKey[:size])
+		}
+		if size > 0 && len(envKey) > size {
+			slog.Warn("HUE_ENCRYPTION_KEY is longer than the AES key size and will be truncated.", "key_size", size)
 		}
 	}
 	return &JSONConfigRepository{filepath: filepath, key: key, defaultKey: defaultKey}

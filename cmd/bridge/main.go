@@ -20,16 +20,7 @@ import (
 
 func main() {
 	levelVar := &slog.LevelVar{}
-	switch os.Getenv("LOG_LEVEL") {
-	case "DEBUG":
-		levelVar.Set(slog.LevelDebug)
-	case "WARN":
-		levelVar.Set(slog.LevelWarn)
-	case "ERROR":
-		levelVar.Set(slog.LevelError)
-	default:
-		levelVar.Set(slog.LevelInfo)
-	}
+	levelVar.Set(logging.ParseLevel(os.Getenv("LOG_LEVEL")))
 	ring := logging.NewLineRing(500, 4096)
 	handler := logging.NewHandler(os.Stdout, ring, levelVar)
 	slog.SetDefault(slog.New(handler))
@@ -152,22 +143,11 @@ func getLocalIP(preferredNet string) string {
 		}
 
 		for _, addr := range addrs {
-			var ip net.IP
-			switch v := addr.(type) {
-			case *net.IPNet:
-				ip = v.IP
-			case *net.IPAddr:
-				ip = v.IP
-			}
-
-			if ip == nil || ip.IsLoopback() {
+			ipStr := ipv4FromAddr(addr)
+			if ipStr == "" {
 				continue
 			}
-
-			ip = ip.To4()
-			if ip == nil {
-				continue
-			}
+			ip := net.ParseIP(ipStr)
 
 			slog.Info("Found IPv4 address", "ip", ip.String(), "interface", iface.Name)
 
@@ -191,4 +171,19 @@ func getLocalIP(preferredNet string) string {
 		}
 	}
 	return bestIP
+}
+
+// ipv4FromAddr returns the non-loopback IPv4 address held by addr, or "".
+// net.IPNet prints as "ip/mask" and net.IPAddr as "ip".
+func ipv4FromAddr(addr net.Addr) string {
+	host, _, _ := strings.Cut(addr.String(), "/")
+	ip := net.ParseIP(host)
+	if ip == nil || ip.IsLoopback() {
+		return ""
+	}
+	ip = ip.To4()
+	if ip == nil {
+		return ""
+	}
+	return ip.String()
 }

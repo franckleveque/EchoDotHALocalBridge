@@ -955,3 +955,16 @@ func TestBridgeService_GetDeviceMetadata(t *testing.T) {
 	meta := s.GetDeviceMetadata(model.MappingTypeLight)
 	assert.Equal(t, "TestType", meta.Type)
 }
+
+func TestExtractEntities_NamePriority(t *testing.T) {
+	s := &BridgeService{}
+	states := []model.HAEntityState{
+		{EntityID: "light.a", Attributes: model.HAFields{"friendly_name": "F", "name": "N"}},
+		{EntityID: "light.b", Attributes: model.HAFields{"name": "N"}},
+		{EntityID: "light.c", Attributes: model.HAFields{"name": 3}},
+		{EntityID: "light.d"},
+	}
+	got := s.extractEntities(states, nil)
+	names := []string{got[0].FriendlyName, got[1].FriendlyName, got[2].FriendlyName, got[3].FriendlyName}
+	assert.Equal(t, []string{"F", "N", "light.c", "light.d"}, names)
+}

@@ -323,3 +323,27 @@ func TestCustomStrategy_ToHue_Fallback(t *testing.T) {
 	hueState = s.ToHue(haState, vd)
 	assert.Equal(t, uint8(50), hueState.Bri)
 }
+
+func TestCustomStrategy_InputAttributePriority(t *testing.T) {
+	s := &CustomStrategy{}
+	vd := &model.VirtualDevice{}
+	st := s.ToHue(model.HAEntityState{State: "on", Attributes: model.HAFields{"value": 9.0, "temperature": 7.0, "current_position": 5.0, "brightness": 3.0}}, vd)
+	assert.Equal(t, uint8(3), st.Bri)
+	st = s.ToHue(model.HAEntityState{State: "on", Attributes: model.HAFields{"value": 9.0, "temperature": 7.0, "current_position": 5.0}}, vd)
+	assert.Equal(t, uint8(5), st.Bri)
+	st = s.ToHue(model.HAEntityState{State: "on", Attributes: model.HAFields{"value": 9.0, "temperature": 7.0}}, vd)
+	assert.Equal(t, uint8(7), st.Bri)
+	st = s.ToHue(model.HAEntityState{State: "on", Attributes: model.HAFields{"value": 9.0}}, vd)
+	assert.Equal(t, uint8(9), st.Bri)
+}
+
+func TestCustomStrategy_DomainMappings(t *testing.T) {
+	s := &CustomStrategy{}
+	on := &model.DeviceState{On: true, Bri: 50}
+	cmd := s.ToHA(on, &model.VirtualDevice{EntityID: "cover.x"})
+	assert.Equal(t, "set_cover_position", cmd.Service)
+	assert.Equal(t, 50, cmd.Data["position"])
+	cmd = s.ToHA(on, &model.VirtualDevice{EntityID: "switch.x"})
+	assert.Equal(t, "turn_on", cmd.Service)
+	assert.Equal(t, float64(50), cmd.Data["value"])
+}

@@ -14,6 +14,9 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+// nameAttributes lists the HA attributes used as display name, by priority.
+var nameAttributes = []string{"friendly_name", "name"}
+
 var RefreshInterval = 30 * time.Second
 
 type BridgeService struct {
@@ -369,11 +372,10 @@ func (s *BridgeService) extractEntities(states []model.HAEntityState, ignored []
 		}
 
 		name := ""
-		if s.Attributes != nil {
-			if n, ok := s.Attributes["friendly_name"].(string); ok {
+		for _, attr := range nameAttributes {
+			if n, ok := s.Attributes[attr].(string); ok {
 				name = n
-			} else if n, ok := s.Attributes["name"].(string); ok {
-				name = n
+				break
 			}
 		}
 		if name == "" {
