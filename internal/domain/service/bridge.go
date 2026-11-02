@@ -98,8 +98,7 @@ func (s *BridgeService) TestDeviceAction(ctx context.Context, vd *model.VirtualD
 		VirtualDevice: vd,
 	}
 
-	t := s.translatorFactory.GetTranslator(vd.Type)
-	cmd := t.ToHA(&stateCopy, vd)
+	cmd := s.translatorFactory.ToHA(vd.Type, &stateCopy, vd)
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -148,8 +147,7 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 				state = model.HAEntityState{EntityID: vd.EntityID, State: "unavailable"}
 			}
 
-			t := s.translatorFactory.GetTranslator(vd.Type)
-			hueState := t.ToHue(state, vd)
+			hueState := s.translatorFactory.ToHue(vd.Type, state, vd)
 
 			newDevices[vd.HueID] = &model.Device{
 				ID:            vd.HueID,
@@ -220,7 +218,7 @@ func (s *BridgeService) GetDevice(ctx context.Context, id string) (*model.Device
 }
 
 func (s *BridgeService) GetDeviceMetadata(deviceType model.MappingType) model.HueMetadata {
-	return s.translatorFactory.GetTranslator(deviceType).GetMetadata()
+	return s.translatorFactory.Metadata(deviceType)
 }
 
 func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, stateUpdate *model.DeviceState) error {
@@ -264,8 +262,7 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, stateU
 	}
 
 	deviceCopy := s.copyDevice(device)
-	t := s.translatorFactory.GetTranslator(device.Type)
-	cmd := t.ToHA(&tmpState, device.VirtualDevice)
+	cmd := s.translatorFactory.ToHA(device.Type, &tmpState, device.VirtualDevice)
 	s.mu.Unlock()
 
 	select {

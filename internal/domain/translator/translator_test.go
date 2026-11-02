@@ -347,3 +347,17 @@ func TestCustomStrategy_DomainMappings(t *testing.T) {
 	assert.Equal(t, "turn_on", cmd.Service)
 	assert.Equal(t, float64(50), cmd.Data["value"])
 }
+
+func TestFactory_Delegation(t *testing.T) {
+	f := NewFactory()
+	f.Register(model.MappingTypeLight, &LightStrategy{})
+	f.Register(model.MappingTypeCover, &CoverStrategy{})
+	vd := &model.VirtualDevice{EntityID: "light.a"}
+	on := &model.DeviceState{On: true, Bri: 10}
+	for _, mt := range []model.MappingType{model.MappingTypeLight, model.MappingTypeCover, "unknown"} {
+		tr := f.GetTranslator(mt)
+		assert.Equal(t, tr.ToHA(on, vd), f.ToHA(mt, on, vd))
+		assert.Equal(t, tr.ToHue(model.HAEntityState{State: "on"}, vd), f.ToHue(mt, model.HAEntityState{State: "on"}, vd))
+		assert.Equal(t, tr.GetMetadata(), f.Metadata(mt))
+	}
+}

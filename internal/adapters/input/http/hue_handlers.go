@@ -10,7 +10,9 @@ import (
 
 // handleAPIUnknown answers paths under /api that no route claims. Hue clients
 // probe several of them, so the historical empty 200 answer is kept.
-func (s *Server) handleAPIUnknown(w http.ResponseWriter, r *http.Request) {}
+func (s *Server) handleAPIUnknown(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+}
 
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, []map[string]interface{}{

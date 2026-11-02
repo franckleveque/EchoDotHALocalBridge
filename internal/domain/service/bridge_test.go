@@ -47,6 +47,18 @@ func (m *MockTranslatorFactory) GetTranslator(mappingType model.MappingType) por
 	return args.Get(0).(ports.Translator)
 }
 
+func (m *MockTranslatorFactory) ToHue(t model.MappingType, haState model.HAEntityState, vd *model.VirtualDevice) *model.DeviceState {
+	return m.GetTranslator(t).ToHue(haState, vd)
+}
+
+func (m *MockTranslatorFactory) ToHA(t model.MappingType, hueState *model.DeviceState, vd *model.VirtualDevice) model.HomeAssistantCommand {
+	return m.GetTranslator(t).ToHA(hueState, vd)
+}
+
+func (m *MockTranslatorFactory) Metadata(t model.MappingType) model.HueMetadata {
+	return m.GetTranslator(t).GetMetadata()
+}
+
 type MockTranslator struct {
 	mock.Mock
 }
