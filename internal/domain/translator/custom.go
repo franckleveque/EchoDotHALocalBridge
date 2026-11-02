@@ -3,13 +3,20 @@ package translator
 import (
 	"github.com/Knetic/govaluate"
 	"hue-bridge-emulator/internal/domain/model"
+	"log/slog"
 	"strings"
 )
 
 // inputAttributes lists the HA attributes read as the input value, by priority.
 var inputAttributes = []string{"brightness", "current_position", "temperature", "value"}
 
-type CustomStrategy struct{}
+type CustomStrategy struct {
+	logger *slog.Logger
+}
+
+func NewCustomStrategy(logger *slog.Logger) *CustomStrategy {
+	return &CustomStrategy{logger: logger}
+}
 
 func (s *CustomStrategy) ToHue(haState model.HAEntityState, vd *model.VirtualDevice) *model.DeviceState {
 	state := &model.DeviceState{}
@@ -62,6 +69,7 @@ func (s *CustomStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevi
 
 	var effect string
 	if vd.ActionConfig != nil {
+		s.logger.Debug("Translator: applying ActionConfig overrides", "strategy", "custom", "entity_id", vd.EntityID, "on", hueState.On)
 		if hueState.On {
 			if vd.ActionConfig.OnService != "" {
 				service = vd.ActionConfig.OnService

@@ -2,13 +2,16 @@ package translator
 
 import (
 	"hue-bridge-emulator/internal/domain/model"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
+var testLogger = slog.New(slog.DiscardHandler)
+
 func TestLightStrategy(t *testing.T) {
-	s := &LightStrategy{}
+	s := NewLightStrategy(testLogger)
 	vd := &model.VirtualDevice{
 		Type: model.MappingTypeLight,
 		ActionConfig: &model.ActionConfig{
@@ -70,7 +73,7 @@ func TestLightStrategy(t *testing.T) {
 }
 
 func TestCoverStrategy(t *testing.T) {
-	s := &CoverStrategy{}
+	s := NewCoverStrategy(testLogger)
 	vd := &model.VirtualDevice{
 		Type: model.MappingTypeCover,
 		ActionConfig: &model.ActionConfig{
@@ -139,7 +142,7 @@ func TestCoverStrategy(t *testing.T) {
 }
 
 func TestClimateStrategy(t *testing.T) {
-	s := &ClimateStrategy{}
+	s := NewClimateStrategy(testLogger)
 	vd := &model.VirtualDevice{
 		Type: model.MappingTypeClimate,
 		ActionConfig: &model.ActionConfig{
@@ -199,7 +202,7 @@ func TestClimateStrategy(t *testing.T) {
 }
 
 func TestCustomStrategy(t *testing.T) {
-	s := &CustomStrategy{}
+	s := NewCustomStrategy(testLogger)
 	vd := &model.VirtualDevice{
 		EntityID: "camera.salon",
 		Type:     model.MappingTypeCustom,
@@ -261,7 +264,7 @@ func TestCustomStrategy(t *testing.T) {
 }
 
 func TestCustomStrategy_Evaluate(t *testing.T) {
-	s := &CustomStrategy{}
+	s := NewCustomStrategy(testLogger)
 	assert.Equal(t, 10.0, s.evaluate("x * 2", 5))
 	assert.Equal(t, 5.0, s.evaluate("x / 2", 10))
 	assert.Equal(t, 5.0, s.evaluate("invalid syntax (", 5)) // Parser error
@@ -271,35 +274,35 @@ func TestCustomStrategy_Evaluate(t *testing.T) {
 }
 
 func TestMetadata(t *testing.T) {
-	ls := &LightStrategy{}
+	ls := NewLightStrategy(testLogger)
 	assert.Equal(t, "Extended color light", ls.GetMetadata().Type)
 
-	cs := &ClimateStrategy{}
+	cs := NewClimateStrategy(testLogger)
 	assert.Equal(t, "Dimmable light", cs.GetMetadata().Type)
 
-	covs := &CoverStrategy{}
+	covs := NewCoverStrategy(testLogger)
 	assert.Equal(t, "Window covering device", covs.GetMetadata().Type)
 
-	custs := &CustomStrategy{}
+	custs := NewCustomStrategy(testLogger)
 	assert.Equal(t, "Extended color light", custs.GetMetadata().Type)
 }
 
 func TestFactory(t *testing.T) {
-	f := NewFactory()
-	f.Register(model.MappingTypeLight, &LightStrategy{})
-	f.Register(model.MappingTypeCover, &CoverStrategy{})
-	f.Register(model.MappingTypeClimate, &ClimateStrategy{})
-	f.Register(model.MappingTypeCustom, &CustomStrategy{})
+	f := NewFactory(testLogger)
+	f.Register(model.MappingTypeLight, NewLightStrategy(testLogger))
+	f.Register(model.MappingTypeCover, NewCoverStrategy(testLogger))
+	f.Register(model.MappingTypeClimate, NewClimateStrategy(testLogger))
+	f.Register(model.MappingTypeCustom, NewCustomStrategy(testLogger))
 
-	assert.IsType(t, &LightStrategy{}, f.GetTranslator(model.MappingTypeLight))
-	assert.IsType(t, &CoverStrategy{}, f.GetTranslator(model.MappingTypeCover))
-	assert.IsType(t, &ClimateStrategy{}, f.GetTranslator(model.MappingTypeClimate))
-	assert.IsType(t, &CustomStrategy{}, f.GetTranslator(model.MappingTypeCustom))
-	assert.IsType(t, &LightStrategy{}, f.GetTranslator("unknown"))
+	assert.IsType(t, NewLightStrategy(testLogger), f.GetTranslator(model.MappingTypeLight))
+	assert.IsType(t, NewCoverStrategy(testLogger), f.GetTranslator(model.MappingTypeCover))
+	assert.IsType(t, NewClimateStrategy(testLogger), f.GetTranslator(model.MappingTypeClimate))
+	assert.IsType(t, NewCustomStrategy(testLogger), f.GetTranslator(model.MappingTypeCustom))
+	assert.IsType(t, NewLightStrategy(testLogger), f.GetTranslator("unknown"))
 }
 
 func TestCustomStrategy_ToHue_Fallback(t *testing.T) {
-	s := &CustomStrategy{}
+	s := NewCustomStrategy(testLogger)
 	vd := &model.VirtualDevice{EntityID: "other.entity"}
 
 	// Test position fallback
@@ -325,7 +328,7 @@ func TestCustomStrategy_ToHue_Fallback(t *testing.T) {
 }
 
 func TestCustomStrategy_InputAttributePriority(t *testing.T) {
-	s := &CustomStrategy{}
+	s := NewCustomStrategy(testLogger)
 	vd := &model.VirtualDevice{}
 	st := s.ToHue(model.HAEntityState{State: "on", Attributes: model.HAFields{"value": 9.0, "temperature": 7.0, "current_position": 5.0, "brightness": 3.0}}, vd)
 	assert.Equal(t, uint8(3), st.Bri)
@@ -338,7 +341,7 @@ func TestCustomStrategy_InputAttributePriority(t *testing.T) {
 }
 
 func TestCustomStrategy_DomainMappings(t *testing.T) {
-	s := &CustomStrategy{}
+	s := NewCustomStrategy(testLogger)
 	on := &model.DeviceState{On: true, Bri: 50}
 	cmd := s.ToHA(on, &model.VirtualDevice{EntityID: "cover.x"})
 	assert.Equal(t, "set_cover_position", cmd.Service)
@@ -349,9 +352,9 @@ func TestCustomStrategy_DomainMappings(t *testing.T) {
 }
 
 func TestFactory_Delegation(t *testing.T) {
-	f := NewFactory()
-	f.Register(model.MappingTypeLight, &LightStrategy{})
-	f.Register(model.MappingTypeCover, &CoverStrategy{})
+	f := NewFactory(testLogger)
+	f.Register(model.MappingTypeLight, NewLightStrategy(testLogger))
+	f.Register(model.MappingTypeCover, NewCoverStrategy(testLogger))
 	vd := &model.VirtualDevice{EntityID: "light.a"}
 	on := &model.DeviceState{On: true, Bri: 10}
 	for _, mt := range []model.MappingType{model.MappingTypeLight, model.MappingTypeCover, "unknown"} {

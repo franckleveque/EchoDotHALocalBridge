@@ -7,11 +7,13 @@ import (
 
 type Factory struct {
 	strategies map[model.MappingType]Translator
+	logger     *slog.Logger
 }
 
-func NewFactory() *Factory {
+func NewFactory(logger *slog.Logger) *Factory {
 	return &Factory{
 		strategies: make(map[model.MappingType]Translator),
+		logger:     logger,
 	}
 }
 
@@ -26,7 +28,7 @@ func (f *Factory) resolve(mappingType model.MappingType) model.MappingType {
 	if _, ok := f.strategies[mappingType]; ok {
 		return mappingType
 	}
-	slog.Warn("Unknown mapping type, falling back to light strategy", "type", mappingType)
+	f.logger.Warn("Unknown mapping type, falling back to light strategy", "type", mappingType)
 	return model.MappingTypeLight
 }
 

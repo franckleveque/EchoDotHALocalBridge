@@ -2,9 +2,16 @@ package translator
 
 import (
 	"hue-bridge-emulator/internal/domain/model"
+	"log/slog"
 )
 
-type CoverStrategy struct{}
+type CoverStrategy struct {
+	logger *slog.Logger
+}
+
+func NewCoverStrategy(logger *slog.Logger) *CoverStrategy {
+	return &CoverStrategy{logger: logger}
+}
 
 func (s *CoverStrategy) ToHue(haState model.HAEntityState, vd *model.VirtualDevice) *model.DeviceState {
 	state := &model.DeviceState{}
@@ -33,6 +40,7 @@ func (s *CoverStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevic
 
 	var effect string
 	if vd.ActionConfig != nil {
+		s.logger.Debug("Translator: applying ActionConfig overrides", "strategy", "cover", "entity_id", vd.EntityID, "on", hueState.On)
 		if hueState.On {
 			if vd.ActionConfig.OnService != "" {
 				service = vd.ActionConfig.OnService
