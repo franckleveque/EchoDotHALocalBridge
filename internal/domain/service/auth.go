@@ -5,16 +5,18 @@ import (
 	"crypto/subtle"
 	"hue-bridge-emulator/internal/domain/model"
 	"hue-bridge-emulator/internal/ports"
+	"log/slog"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
 type AuthService struct {
 	authRepo ports.AuthPort
+	logger   *slog.Logger
 }
 
-func NewAuthService(authRepo ports.AuthPort) *AuthService {
-	return &AuthService{authRepo: authRepo}
+func NewAuthService(authRepo ports.AuthPort, logger *slog.Logger) *AuthService {
+	return &AuthService{authRepo: authRepo, logger: logger}
 }
 
 func (s *AuthService) Verify(ctx context.Context, username, password string) (bool, error) {
@@ -32,7 +34,11 @@ func (s *AuthService) Verify(ctx context.Context, username, password string) (bo
 
 	userMatch := subtle.ConstantTimeCompare([]byte(username), []byte(config.Username)) == 1
 	if bcrypt.CompareHashAndPassword([]byte(config.Password), []byte(password)) != nil {
+		s.logger.Warn("Auth: invalid password", "username", username)
 		return false, nil
+	}
+	if !userMatch {
+		s.logger.Warn("Auth: unknown username", "username", username)
 	}
 
 	return userMatch, nil
@@ -49,6 +55,7 @@ func (s *AuthService) CreateCredentials(ctx context.Context, username, password 
 		Password: string(hashedPassword),
 	}
 
+	s.logger.Info("Auth: credentials created", "username", username)
 	return s.authRepo.Save(ctx, auth)
 }
 

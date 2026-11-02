@@ -11,4 +11,8 @@ func TestHAAPIError_Error(t *testing.T) {
 	if got, want := e.Error(), "HA API error: 400"; got != want {
 		t.Errorf("got %q want %q", got, want)
 	}
+	e = &HAAPIError{Status: 500, Body: "oops: "}
+	if got, want := e.Error(), "HA API error: 500: oops: "; got != want {
+		t.Errorf("got %q want %q", got, want)
+	}
 }
