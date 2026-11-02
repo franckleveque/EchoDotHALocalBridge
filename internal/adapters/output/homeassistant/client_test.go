@@ -47,7 +47,7 @@ func captureLogsAt(t *testing.T, level slog.Level) *syncBuffer {
 }
 
 func newTestClient(url string) *Client {
-	c := NewClient()
+	c := NewClient(slog.Default())
 	c.Configure(url, "test-token")
 	return c
 }

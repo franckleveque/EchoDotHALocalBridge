@@ -9,7 +9,7 @@ import (
 
 func TestNewHandler_WritesToBoth(t *testing.T) {
 	var buf bytes.Buffer
-	ring := NewLineRing(10, 4096)
+	ring := NewLineRing(10, 4096, testLogger)
 	log := slog.New(NewHandler(&buf, ring, slog.LevelInfo))
 	log.Info("hello")
 	log.Debug("hidden")

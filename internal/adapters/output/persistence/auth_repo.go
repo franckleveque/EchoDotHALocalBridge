@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"hue-bridge-emulator/internal/domain/model"
+	"log/slog"
 	"os"
 	"sync"
 )
@@ -12,10 +13,11 @@ type JSONAuthRepository struct {
 	filepath string
 	mu       sync.RWMutex
 	cache    *model.AuthConfig
+	logger   *slog.Logger
 }
 
-func NewJSONAuthRepository(filepath string) *JSONAuthRepository {
-	return &JSONAuthRepository{filepath: filepath}
+func NewJSONAuthRepository(filepath string, logger *slog.Logger) *JSONAuthRepository {
+	return &JSONAuthRepository{filepath: filepath, logger: logger}
 }
 
 func (r *JSONAuthRepository) Get(ctx context.Context) (*model.AuthConfig, error) {
@@ -36,6 +38,7 @@ func (r *JSONAuthRepository) Get(ctx context.Context) (*model.AuthConfig, error)
 
 	data, err := os.ReadFile(r.filepath)
 	if err != nil {
+		r.logger.Error("Auth: read failed", "path", r.filepath, "error", err)
 		return nil, err
 	}
 
@@ -58,8 +61,10 @@ func (r *JSONAuthRepository) Save(ctx context.Context, auth *model.AuthConfig) e
 	}
 
 	if err := os.WriteFile(r.filepath, data, 0600); err != nil {
+		r.logger.Error("Auth: write failed", "path", r.filepath, "error", err)
 		return err
 	}
+	r.logger.Debug("Auth: saved", "path", r.filepath)
 
 	r.cache = auth
 	return nil

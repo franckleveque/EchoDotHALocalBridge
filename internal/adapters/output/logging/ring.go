@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"log/slog"
 	"strings"
 	"sync"
 )
@@ -12,18 +13,22 @@ type LineRing struct {
 	start    int
 	count    int
 	maxBytes int
+	logger   *slog.Logger
 }
 
-func NewLineRing(maxLines, maxLineBytes int) *LineRing {
+// NewLineRing builds a ring of maxLines lines. The logger must NOT feed this
+// ring (use a stdout-only logger): logging into the sink would recurse.
+func NewLineRing(maxLines, maxLineBytes int, logger *slog.Logger) *LineRing {
 	if maxLines < 1 {
 		maxLines = 1
 	}
-	return &LineRing{lines: make([]string, maxLines), maxBytes: maxLineBytes}
+	return &LineRing{lines: make([]string, maxLines), maxBytes: maxLineBytes, logger: logger}
 }
 
 func (r *LineRing) Write(p []byte) (int, error) {
 	line := strings.TrimRight(string(p), "\r\n")
 	if r.maxBytes > 0 && len(line) > r.maxBytes {
+		r.logger.Debug("Log line truncated", "bytes", len(line), "max_bytes", r.maxBytes)
 		line = line[:r.maxBytes]
 	}
 	r.mu.Lock()

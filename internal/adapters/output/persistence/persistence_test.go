@@ -1,12 +1,17 @@
 package persistence
 
 import (
+	"bytes"
 	"context"
-	"hue-bridge-emulator/internal/domain/model"
-	"os"
-	"testing"
 	"github.com/stretchr/testify/assert"
+	"hue-bridge-emulator/internal/domain/model"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"testing"
 )
+
+var testLogger = slog.New(slog.DiscardHandler)
 
 func TestJSONConfigRepository_Migration(t *testing.T) {
 	tmpFile := "test_config_legacy.json"
@@ -30,7 +35,7 @@ func TestJSONConfigRepository_Migration(t *testing.T) {
 	}`
 	os.WriteFile(tmpFile, []byte(legacyData), 0644)
 
-	repo := NewJSONConfigRepository(tmpFile)
+	repo := NewJSONConfigRepository(tmpFile, testLogger)
 	cfg, err := repo.Get(context.Background())
 
 	assert.NoError(t, err)
@@ -44,7 +49,7 @@ func TestJSONConfigRepository_NewFormat(t *testing.T) {
 	tmpFile := "test_config_new.json"
 	defer os.Remove(tmpFile)
 
-	repo := NewJSONConfigRepository(tmpFile)
+	repo := NewJSONConfigRepository(tmpFile, testLogger)
 	cfg := &model.Config{
 		HassURL: "http://ha:8123",
 		VirtualDevices: []*model.VirtualDevice{
@@ -70,8 +75,39 @@ func TestSelectKeySize(t *testing.T) {
 
 func TestNewJSONConfigRepository_KeyFromEnv(t *testing.T) {
 	t.Setenv("HUE_ENCRYPTION_KEY", "0123456789abcdefghijklmnopq") // 27 chars -> 24
-	assert.Equal(t, []byte("0123456789abcdefghijklmn"), NewJSONConfigRepository("x").key)
+	assert.Equal(t, []byte("0123456789abcdefghijklmn"), NewJSONConfigRepository("x", testLogger).key)
 	t.Setenv("HUE_ENCRYPTION_KEY", "short")
-	r := NewJSONConfigRepository("x")
+	r := NewJSONConfigRepository("x", testLogger)
 	assert.Equal(t, r.defaultKey, r.key)
+}
+
+func TestJSONAuthRepository_SaveGetAndLogsWriteFailure(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	path := filepath.Join(t.TempDir(), "auth.json")
+	repo := NewJSONAuthRepository(path, logger)
+	assert.False(t, repo.Exists())
+	assert.NoError(t, repo.Save(context.Background(), &model.AuthConfig{Username: "u", Password: "h"}))
+	got, err := repo.Get(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, "u", got.Username)
+
+	bad := NewJSONAuthRepository(filepath.Join(t.TempDir(), "missing", "auth.json"), logger)
+	assert.Error(t, bad.Save(context.Background(), &model.AuthConfig{}))
+	_, err = bad.Get(context.Background())
+	assert.Error(t, err)
+	assert.Contains(t, buf.String(), "Auth: write failed")
+	assert.Contains(t, buf.String(), "Auth: read failed")
+}
+
+func TestJSONConfigRepository_WarnsOnPlaintextTokenWithoutLeakingIt(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	path := filepath.Join(t.TempDir(), "c.json")
+	os.WriteFile(path, []byte(`{"hass_url":"u","hass_token":"plain token!","virtual_devices":[{"hue_id":"1","name":"n","entity_id":"light.a","type":"light"}]}`), 0600)
+	cfg, err := NewJSONConfigRepository(path, logger).Get(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, "plain token!", cfg.HassToken)
+	assert.Contains(t, buf.String(), "not encrypted")
+	assert.NotContains(t, buf.String(), "plain token!")
 }
