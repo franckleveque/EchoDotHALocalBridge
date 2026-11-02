@@ -64,17 +64,17 @@ const adminLogsHTML = `<!DOCTYPE html>
         var filterEl = document.getElementById('filter');
         var info = document.getElementById('info');
 
+        function message(shown) {
+            if (lines.length === 0) { return 'No log lines yet.'; }
+            if (shown.length === 0) { return 'No lines match the filter.'; }
+            return shown.join('\n');
+        }
+
         function render() {
             var q = filterEl.value.toLowerCase();
             var shown = lines.filter(function (l) { return q === '' || l.toLowerCase().indexOf(q) !== -1; });
             var atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
-            if (lines.length === 0) {
-                pre.textContent = 'No log lines yet.';
-            } else if (shown.length === 0) {
-                pre.textContent = 'No lines match the filter.';
-            } else {
-                pre.textContent = shown.join('\n');
-            }
+            pre.textContent = message(shown);
             info.textContent = shown.length + ' / ' + lines.length + ' lines';
             if (atBottom) { pre.scrollTop = pre.scrollHeight; }
         }

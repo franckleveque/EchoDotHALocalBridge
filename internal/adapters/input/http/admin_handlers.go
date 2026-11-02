@@ -2,7 +2,6 @@ package http
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"hue-bridge-emulator/internal/domain/model"
 	"net/http"
@@ -10,64 +9,72 @@ import (
 	"time"
 )
 
-func (s *Server) handleAdminSetup(w http.ResponseWriter, r *http.Request) {
-	if s.authService.Exists() {
-		// Cleanup the limiter map once setup is done to free memory
-		s.limiterMu.Lock()
-		if len(s.setupLimiter) > 0 {
-			s.setupLimiter = make(map[string]time.Time)
+// withSetupGuard refuses setup requests once credentials exist and rate limits
+// the others per client IP.
+func (s *Server) withSetupGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.authService.Exists() {
+			// Cleanup the limiter map once setup is done to free memory
+			s.limiterMu.Lock()
+			if len(s.setupLimiter) > 0 {
+				s.setupLimiter = make(map[string]time.Time)
+			}
+			s.limiterMu.Unlock()
+
+			http.Error(w, "Forbidden - Setup already completed", http.StatusForbidden)
+			return
 		}
-		s.limiterMu.Unlock()
 
-		http.Error(w, "Forbidden - Setup already completed", http.StatusForbidden)
-		return
-	}
+		// Rate limiting for setup
+		ip := s.getClientIP(r)
+		s.limiterMu.Lock()
+		if last, ok := s.setupLimiter[ip]; ok && time.Since(last) < 2*time.Second {
+			s.limiterMu.Unlock()
+			http.Error(w, "Too many requests", http.StatusTooManyRequests)
+			return
+		}
 
-	// Rate limiting for setup
-	ip := s.getClientIP(r)
-	s.limiterMu.Lock()
-	if last, ok := s.setupLimiter[ip]; ok && time.Since(last) < 2*time.Second {
-		s.limiterMu.Unlock()
-		http.Error(w, "Too many requests", http.StatusTooManyRequests)
-		return
-	}
-
-	// Basic cleanup: if map gets too large, clear it
-	if len(s.setupLimiter) > 1000 {
-		for k, v := range s.setupLimiter {
-			if time.Since(v) > 10*time.Minute {
-				delete(s.setupLimiter, k)
+		// Basic cleanup: if map gets too large, clear it
+		if len(s.setupLimiter) > 1000 {
+			for k, v := range s.setupLimiter {
+				if time.Since(v) > 10*time.Minute {
+					delete(s.setupLimiter, k)
+				}
 			}
 		}
+
+		s.setupLimiter[ip] = time.Now()
+		s.limiterMu.Unlock()
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) handleAdminSetupPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprint(w, adminSetupHTML)
+}
+
+func (s *Server) handleAdminSetupSubmit(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
-	s.setupLimiter[ip] = time.Now()
-	s.limiterMu.Unlock()
+	username := r.FormValue("username")
+	password := r.FormValue("password")
 
-	if r.Method == "GET" {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, adminSetupHTML)
-	} else if r.Method == "POST" {
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		username := r.FormValue("username")
-		password := r.FormValue("password")
-
-		if len(username) < 3 || len(password) < 8 {
-			http.Error(w, "Invalid username or password length", http.StatusBadRequest)
-			return
-		}
-
-		if err := s.authService.CreateCredentials(r.Context(), username, password); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	if len(username) < 3 || len(password) < 8 {
+		http.Error(w, "Invalid username or password length", http.StatusBadRequest)
+		return
 	}
+
+	if err := s.authService.CreateCredentials(r.Context(), username, password); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }
 
 func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
@@ -75,50 +82,50 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, adminHTML)
 }
 
-func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		cfg, err := s.admin.GetConfig(r.Context())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// Mask token for frontend
-		displayCfg := struct {
-			HassURL             string                 `json:"hass_url"`
-			HassToken           string                 `json:"hass_token"`
-			HassTokenConfigured bool                   `json:"hass_token_configured"`
-			VirtualDevices      []*model.VirtualDevice `json:"virtual_devices"`
-		}{
-			HassURL:             cfg.HassURL,
-			HassToken:           "",
-			HassTokenConfigured: cfg.HassToken != "",
-			VirtualDevices:      cfg.VirtualDevices,
-		}
-
-		s.jsonResponse(w, displayCfg)
-	} else if r.Method == "POST" {
-		var newCfg model.Config
-		if err := json.NewDecoder(r.Body).Decode(&newCfg); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		// If token is empty, keep the existing one
-		if newCfg.HassToken == "" {
-			currentCfg, err := s.admin.GetConfig(r.Context())
-			if err == nil {
-				newCfg.HassToken = currentCfg.HassToken
-			}
-		}
-
-		err := s.admin.UpdateConfig(r.Context(), &newCfg)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
+func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
+	cfg, err := s.admin.GetConfig(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
+
+	// Mask token for frontend
+	displayCfg := struct {
+		HassURL             string                 `json:"hass_url"`
+		HassToken           string                 `json:"hass_token"`
+		HassTokenConfigured bool                   `json:"hass_token_configured"`
+		VirtualDevices      []*model.VirtualDevice `json:"virtual_devices"`
+	}{
+		HassURL:             cfg.HassURL,
+		HassToken:           "",
+		HassTokenConfigured: cfg.HassToken != "",
+		VirtualDevices:      cfg.VirtualDevices,
+	}
+
+	s.jsonResponse(w, displayCfg)
+}
+
+func (s *Server) handleConfigPost(w http.ResponseWriter, r *http.Request) {
+	var newCfg model.Config
+	if err := json.NewDecoder(r.Body).Decode(&newCfg); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// If token is empty, keep the existing one
+	if newCfg.HassToken == "" {
+		currentCfg, err := s.admin.GetConfig(r.Context())
+		if err == nil {
+			newCfg.HassToken = currentCfg.HassToken
+		}
+	}
+
+	err := s.admin.UpdateConfig(r.Context(), &newCfg)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) handleHAEntities(w http.ResponseWriter, r *http.Request) {
@@ -167,20 +174,7 @@ func (s *Server) handleAdminTestAction(w http.ResponseWriter, r *http.Request) {
 
 	err := s.admin.TestDeviceAction(r.Context(), req.VirtualDevice, parseStateUpdate(req.StateUpdate))
 	if err != nil {
-		var haErr *model.HAAPIError
-		switch {
-		case errors.Is(err, model.ErrInvalidTestRequest):
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		case errors.Is(err, model.ErrNoOpAction):
-			http.Error(w, err.Error(), http.StatusConflict)
-		case errors.Is(err, model.ErrTooManyRequests):
-			http.Error(w, err.Error(), http.StatusTooManyRequests)
-		case errors.As(err, &haErr):
-			http.Error(w, err.Error(), http.StatusBadGateway)
-		default:
-			// Network errors and timeouts: Home Assistant is the upstream.
-			http.Error(w, err.Error(), http.StatusBadGateway)
-		}
+		http.Error(w, err.Error(), statusForTestError(err))
 		return
 	}
 

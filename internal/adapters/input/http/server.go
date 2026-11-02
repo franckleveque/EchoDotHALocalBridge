@@ -47,13 +47,29 @@ func (s *Server) Mux() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleRoot)
 	mux.HandleFunc("/description.xml", s.handleDescription)
-	mux.HandleFunc("/api", s.handleAPI)
-	mux.HandleFunc("/api/", s.handleAPI)
 
-	// Admin routes with Basic Auth
-	mux.HandleFunc("/admin/setup", s.handleAdminSetup)
+	// Hue API. Method-less patterns let handlers keep their own method checks.
+	mux.HandleFunc("POST /api", s.handleRegister)
+	mux.HandleFunc("POST /api/{$}", s.handleRegister)
+	for _, p := range []string{"/api", "/api/{$}", "/api/{user}", "/api/{user}/{$}"} {
+		mux.HandleFunc(p, s.handleFullState)
+	}
+	for _, p := range []string{"/api/{user}/lights", "/api/{user}/lights/{$}"} {
+		mux.HandleFunc(p, s.handleGetLights)
+	}
+	mux.HandleFunc("/api/{user}/lights/{id}", s.handleGetLight)
+	mux.HandleFunc("/api/{user}/lights/{id}/{$}", s.handleGetLight)
+	mux.HandleFunc("/api/{user}/lights/{id}/state", s.handleSetLightState)
+	mux.HandleFunc("/api/", s.handleAPIUnknown)
+
+	// Admin routes
+	mux.Handle("GET /admin/setup", s.withSetupGuard(http.HandlerFunc(s.handleAdminSetupPage)))
+	mux.Handle("POST /admin/setup", s.withSetupGuard(http.HandlerFunc(s.handleAdminSetupSubmit)))
+	mux.HandleFunc("/admin/setup", s.handleMethodNotAllowed)
 	mux.Handle("/admin", s.withBasicAuth(http.HandlerFunc(s.handleAdmin)))
-	mux.Handle("/admin/config", s.withBasicAuth(http.HandlerFunc(s.handleConfig)))
+	mux.Handle("GET /admin/config", s.withBasicAuth(http.HandlerFunc(s.handleConfigGet)))
+	mux.Handle("POST /admin/config", s.withBasicAuth(http.HandlerFunc(s.handleConfigPost)))
+	mux.Handle("/admin/config", s.withBasicAuth(http.HandlerFunc(s.handleMethodNotAllowed)))
 	mux.Handle("/admin/ha-entities", s.withBasicAuth(http.HandlerFunc(s.handleHAEntities)))
 	mux.Handle("/admin/test-action", s.withBasicAuth(http.HandlerFunc(s.handleAdminTestAction)))
 	mux.Handle("/admin/logs", s.withBasicAuth(http.HandlerFunc(s.handleLogsPage)))
@@ -98,6 +114,10 @@ func (s *Server) withBasicAuth(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) handleMethodNotAllowed(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 }
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {

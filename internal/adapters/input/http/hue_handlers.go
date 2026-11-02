@@ -4,42 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/amimof/huego"
 )
 
-func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/api")
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-
-	if r.Method == "POST" && (path == "" || path == "/") {
-		s.handleRegister(w, r)
-		return
-	}
-
-	if len(parts) < 1 {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	subPath := parts[1:]
-	if len(subPath) == 0 {
-		s.handleFullState(w, r)
-		return
-	}
-
-	switch subPath[0] {
-	case "lights":
-		if len(subPath) == 1 {
-			s.handleGetLights(w, r)
-		} else if len(subPath) == 2 {
-			s.handleGetLight(w, r, subPath[1])
-		} else if len(subPath) == 3 && subPath[2] == "state" {
-			s.handleSetLightState(w, r, subPath[1])
-		}
-	}
-}
+// handleAPIUnknown answers paths under /api that no route claims. Hue clients
+// probe several of them, so the historical empty 200 answer is kept.
+func (s *Server) handleAPIUnknown(w http.ResponseWriter, r *http.Request) {}
 
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, []map[string]interface{}{
@@ -110,7 +81,8 @@ func (s *Server) handleGetLights(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, lights)
 }
 
-func (s *Server) handleGetLight(w http.ResponseWriter, r *http.Request, id string) {
+func (s *Server) handleGetLight(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
 	device, err := s.hue.GetDevice(r.Context(), id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
@@ -130,7 +102,8 @@ func (s *Server) handleGetLight(w http.ResponseWriter, r *http.Request, id strin
 	s.jsonResponse(w, l)
 }
 
-func (s *Server) handleSetLightState(w http.ResponseWriter, r *http.Request, id string) {
+func (s *Server) handleSetLightState(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
 	if r.Method != "PUT" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
