@@ -1,0 +1,456 @@
+# Règles d'architecture OpenGrep pour EchoDotHALocalBridge (Go)
+# Exécution : opengrep scan -f .opengrep/architecture.yml --error .
+# Portée : code de production uniquement (les *_test.go sont exclus).
+rules:
+  # =========================================================================
+  # HEXAGONAL : sens des dépendances (reprend internal/architecture_test.go)
+  # =========================================================================
+  - id: hexa-domain-no-adapters
+    languages: [go]
+    severity: ERROR
+    message: "Le domaine ne doit pas importer un adapter ($PKG)."
+    paths: { include: ["/internal/domain/"], exclude: [".opengrep/", "*_test.go"] }
+    patterns:
+      - pattern: import "$PKG"
+      - metavariable-regex: { metavariable: $PKG, regex: '.*/internal/adapters(/|$)' }
+      - focus-metavariable: $PKG
+
+  - id: hexa-ports-no-adapters
+    languages: [go]
+    severity: ERROR
+    message: "Les ports ne doivent pas importer un adapter ($PKG) : un port reste une interface pure."
+    paths: { include: ["/internal/ports/"], exclude: [".opengrep/", "*_test.go"] }
+    patterns:
+      - pattern: import "$PKG"
+      - metavariable-regex: { metavariable: $PKG, regex: '.*/internal/adapters(/|$)' }
+      - focus-metavariable: $PKG
+
+  - id: hexa-input-adapters-no-domain-implementation
+    languages: [go]
+    severity: ERROR
+    message: "Un adapter d'entrée ne dépend que des ports et du modèle, pas de $PKG."
+    paths: { include: ["/internal/adapters/input/"], exclude: [".opengrep/", "*_test.go"] }
+    patterns:
+      - pattern: import "$PKG"
+      - metavariable-regex: { metavariable: $PKG, regex: '.*/internal/domain/(service|translator)(/|$)' }
+      - focus-metavariable: $PKG
+
+  - id: hexa-input-adapters-no-output-adapters
+    languages: [go]
+    severity: ERROR
+    message: "Un adapter d'entrée ne doit pas appeler un adapter de sortie ($PKG) : passer par un port."
+    paths: { include: ["/internal/adapters/input/"], exclude: [".opengrep/", "*_test.go"] }
+    patterns:
+      - pattern: import "$PKG"
+      - metavariable-regex: { metavariable: $PKG, regex: '.*/internal/adapters/output(/|$)' }
+      - focus-metavariable: $PKG
+
+  - id: hexa-output-adapters-no-input-adapters
+    languages: [go]
+    severity: ERROR
+    message: "Un adapter de sortie ne doit pas dépendre d'un adapter d'entrée ($PKG)."
+    paths: { include: ["/internal/adapters/output/"], exclude: [".opengrep/", "*_test.go"] }
+    patterns:
+      - pattern: import "$PKG"
+      - metavariable-regex: { metavariable: $PKG, regex: '.*/internal/adapters/input(/|$)' }
+      - focus-metavariable: $PKG
+
+  - id: hexa-model-no-dependencies
+    languages: [go]
+    severity: ERROR
+    message: "Le modèle du domaine ne dépend ni des ports ni des services ni des translators ($PKG)."
+    paths: { include: ["/internal/domain/model/"], exclude: [".opengrep/", "*_test.go"] }
+    patterns:
+      - pattern: import "$PKG"
+      - metavariable-regex: { metavariable: $PKG, regex: '.*/internal/(ports|domain/service|domain/translator)(/|$)' }
+      - focus-metavariable: $PKG
+
+  - id: hexa-domain-subpackages-direction
+    languages: [go]
+    severity: ERROR
+    message: "service et translator ne doivent pas dépendre l'un de l'autre ($PKG)."
+    paths: { include: ["/internal/domain/service/", "/internal/domain/translator/"], exclude: [".opengrep/", "*_test.go"] }
+    patterns:
+      - pattern: import "$PKG"
+      - metavariable-regex: { metavariable: $PKG, regex: '.*/internal/domain/(service|translator)(/|$)' }
+      - focus-metavariable: $PKG
+
+  # =========================================================================
+  # DDD : technique et infrastructure interdites dans le domaine
+  # =========================================================================
+  - id: ddd-domain-no-infrastructure
+    languages: [go]
+    severity: ERROR
+    message: "Le domaine ne doit pas utiliser directement l'infrastructure ($PKG) : passer par un port."
+    paths: { include: ["/internal/domain/"], exclude: [".opengrep/", "*_test.go"] }
+    patterns:
+      - pattern: import "$PKG"
+      - metavariable-regex:
+          metavariable: $PKG
+          regex: '^(net|net/.*|os|os/.*|io/fs|database/.*|encoding/json|github\.com/amimof/huego)$'
+      - focus-metavariable: $PKG
+
+  - id: ddd-model-no-public-setter
+    languages: [go]
+    severity: WARNING
+    message: "Setter public $M sur un objet du domaine : exposer une opération métier plutôt qu'un setter."
+    paths: { include: ["/internal/domain/model/"], exclude: [".opengrep/", "*_test.go"] }
+    patterns:
+      - pattern-either:
+          - pattern: |
+              func ($R *$T) $M(...) {
+                ...
+              }
+          - pattern: |
+              func ($R $T) $M(...) {
+                ...
+              }
+      - metavariable-regex: { metavariable: $M, regex: '^Set[A-Z]' }
+      - focus-metavariable: $M
+
+  # =========================================================================
+  # SOLID
+  # =========================================================================
+  - id: ocp-no-switch-or-else-if
+    languages: [go]
+    severity: WARNING
+    message: "switch ou chaîne if / else if : chaque nouveau cas modifie ce site (OCP). Préférer une interface, une stratégie ou une table."
+    paths: { include: ["/internal/", "/cmd/"], exclude: [".opengrep/", "*_test.go"] }
+    patterns:
+      - pattern-either:
+          - pattern: |
+              switch $E {
+              case $V:
+                ...
+              }
+          - pattern: |
+              switch {
+              case $V:
+                ...
+              }
+          - pattern: |
+              switch $I; $E {
+              case $V:
+                ...
+              }
+          - pattern: |
+              switch $X.(type) {
+              case $V:
+                ...
+              }
+          - pattern: |
+              switch $W := $X.(type) {
+              case $V:
+                ...
+              }
+          # else if : détecté sur le texte, à la position du if imbriqué (comme Celly).
+          # OpenGrep assimile else { if ... } à else if : l'arbre ne les distingue pas.
+          - pattern-regex: '\}[ \t]*else[ \t]+if\b'
+      # select attend sur des canaux : ce n'est pas un aiguillage par cas métier
+      - pattern-not: |
+          select {
+          case <-$SELC:
+            ...
+          }
+      - pattern-not: |
+          select {
+          case $SELX := <-$SELC:
+            ...
+          }
+      - pattern-not: |
+          select {
+          case $SELC <- $SELV:
+            ...
+          }
+      - pattern-not: |
+          select {
+          case <-$SELC:
+            ...
+          default:
+            ...
+          }
+      - pattern-not: |
+          select {
+          case $SELX := <-$SELC:
+            ...
+          default:
+            ...
+          }
+      - pattern-not: |
+          select {
+          case $SELC <- $SELV:
+            ...
+          default:
+            ...
+          }
+
+  - id: dip-adapter-field-concrete-service
+    languages: [go]
+    severity: ERROR
+    message: "Champ typé par l'implémentation *service.$T : injecter une interface de ports/ (DIP)."
+    paths: { include: ["/internal/adapters/"], exclude: [".opengrep/", "*_test.go"] }
+    patterns:
+      - pattern-inside: |
+          type $S struct {
+            ...
+          }
+      - pattern-regex: '\*service\.(?P<T>[A-Z]\w*)'
+
+  - id: dip-adapter-builds-domain-object
+    languages: [go]
+    severity: ERROR
+    message: "Un adapter construit un objet du domaine (translator.$F) : c'est le rôle de la racine de composition."
+    paths: { include: ["/internal/adapters/"], exclude: [".opengrep/", "*_test.go"] }
+    patterns:
+      - pattern: translator.$F(...)
+      - metavariable-regex: { metavariable: $F, regex: '^New' }
+
+  - id: port-untyped-contract
+    languages: [go]
+    severity: WARNING
+    message: "Le port expose un type non typé : utiliser un struct du domaine."
+    paths: { include: ["/internal/ports/"], exclude: [".opengrep/", "*_test.go"] }
+    patterns:
+      - pattern-inside: |
+          type $I interface {
+            ...
+          }
+      - pattern-regex: 'map\[string\](interface\{\}|any)|interface\{\}|\bany\b'
+
+  - id: go-context-first-param
+    languages: [go]
+    severity: WARNING
+    message: "context.Context doit être le premier paramètre."
+    paths: { include: ["/internal/ports/", "/internal/domain/service/"], exclude: [".opengrep/", "*_test.go"] }
+    pattern-regex: '\b\w+\([^()]*?,\s*\w+\s+context\.Context'
+
+  # =========================================================================
+  # Règles reprises de l'outil Celly (architecture-rules.go.yml)
+  # =========================================================================
+  - id: one-type-per-file
+    languages: [go]
+    severity: WARNING
+    message: "Plusieurs types de premier niveau dans ce fichier : un type par fichier, nommé comme le type ($T)."
+    paths: { include: ["/internal/", "/cmd/"], exclude: [".opengrep/", "*_test.go"] }
+    # gofmt place les déclarations de premier niveau en colonne 0 : l'ancrage ^type
+    # écarte les types déclarés dans une fonction. Les alias (type A = B) ne comptent pas.
+    # Limite : les blocs groupés type ( A ...; B ... ) ne sont pas comptés.
+    patterns:
+      - pattern-either:
+          # tous les types suivis d'un autre type de premier niveau
+          - pattern-regex: '(?m)^type[ \t]+(?P<T>\w+)[ \t]+(?!=)(?=(?s:.*?)^type[ \t]+\w+[ \t]+(?!=))'
+          # le dernier type d'un fichier qui en contient au moins deux
+          - pattern-regex: '\A(?s:.*)^type[ \t]+\w+[ \t]+(?!=)(?s:.*)^type[ \t]+(?P<T>\w+)[ \t]+(?!=)'
+      - focus-metavariable: $T
+
+  - id: isp-interface-size
+    languages: [go]
+    severity: WARNING
+    message: "Interface de plus de 5 méthodes : la scinder par usage."
+    paths: { include: ["/internal/", "/cmd/"], exclude: [".opengrep/", "*_test.go"] }
+    patterns:
+      - pattern: |
+          type $I interface {
+            ...
+          }
+      - pattern-regex: 'interface\s*\{(?:[^{}]*?\n\s*[A-Za-z_]\w*\(){6}'
+  - id: lsp-no-not-implemented
+    languages: [go]
+    severity: ERROR
+    message: "Méthode qui ne tient pas son contrat (« not implemented »)."
+    paths: { include: ["/internal/", "/cmd/"], exclude: [".opengrep/", "*_test.go"] }
+    patterns:
+      - pattern-either:
+          - pattern: panic("$MSG")
+          - pattern: errors.New("$MSG")
+      - metavariable-regex: { metavariable: $MSG, regex: '(?i).*(not implemented|unimplemented)' }
+  - id: no-utility-package
+    languages: [go]
+    severity: WARNING
+    message: "Paquet fourre-tout ($P) : un paquet porte un domaine."
+    paths: { include: ["/internal/", "/cmd/"], exclude: [".opengrep/", "*_test.go"] }
+    patterns:
+      - pattern: package $P
+      - metavariable-regex: { metavariable: $P, regex: '^(util|utils|common|helper|helpers|misc|shared)$' }
+      - focus-metavariable: $P
+
+  # =========================================================================
+  # DEMETER : appel sur le résultat d'un appel d'un collaborateur
+  # =========================================================================
+  - id: demeter-chain
+    languages: [go]
+    severity: WARNING
+    message: "Loi de Demeter : appel sur un objet qui n'est pas un ami (objet renvoyé par un appel, ou attribut d'un autre objet). Déléguer au collaborateur direct. Faux positif possible : si l'appel appartient au framework, le lever en revue par // nosemgrep: demeter-chain (avec la raison)."
+    # FAUX POSITIFS ATTENDUS : sans résolution de types, cette règle signale aussi des
+    # chaînes imposées par le langage ou le framework (net/http, DOM, réflexion, XML,
+    # méthodes de collection au nom ambigu comme Count ou push). Chaque détection doit
+    # être traitée en revue : si l'appel appartient au framework, la lever sur la ligne
+    # par « // nosemgrep: demeter-chain » suivi de la raison ; sinon, corriger le code.
+    paths: { include: ["/internal/", "/cmd/"], exclude: [".opengrep/", "*_test.go"] }
+    # Loi de Demeter (https://en.wikipedia.org/wiki/Law_of_Demeter) : une méthode m de a
+    # n'appelle que les méthodes de a, des paramètres de m, des objets instanciés dans m,
+    # des attributs de a et des variables globales. Tout objet renvoyé par une autre
+    # méthode est un étranger : a.m().n() viole la loi, y compris via une variable.
+    # Interprétation : en Go, NewX(...) est l'instanciation idiomatique (pas de
+    # constructeur) ; l'objet renvoyé par NewX est donc traité comme instancié dans m.
+    options: { symbolic_propagation: true }
+    patterns:
+      - pattern-either:
+          # objet renvoyé par un appel, quelle que soit la racine
+          - patterns:
+              - pattern-either:
+                  - pattern: $X.$A(...).$B(...)
+                  - pattern: $X.$F.$A(...).$B(...)
+                  - pattern: $A(...).$B(...)
+              - metavariable-regex: { metavariable: $A, regex: '^(?!([\w.]+\.)?New)' }
+          # attribut d'un attribut de soi : s.a.b.M()
+          - patterns:
+              - pattern-inside: |
+                  func ($X $T) $M(...) {
+                    ...
+                  }
+              - pattern: $X.$F.$G.$B(...)
+          # attribut d'un paramètre ou d'une variable locale : p.a.M()
+          - patterns:
+              - pattern-either:
+                  - pattern-inside: |
+                      func $M(..., $X $T, ...) {
+                        ...
+                      }
+                  - pattern-inside: |
+                      func ($R $RT) $M(..., $X $T, ...) {
+                        ...
+                      }
+                  - pattern-inside: |
+                      func(..., $X $T, ...) {
+                        ...
+                      }
+                  - pattern-inside: |
+                      $X := $E
+                      ...
+                  - pattern-inside: |
+                      $X, $Y := $E
+                      ...
+                  - pattern-inside: |
+                      $Y, $X := $E
+                      ...
+                  - pattern-inside: |
+                      var $X $T
+                      ...
+              - pattern: $X.$F.$B(...)
+      # Exclusions intégrées : uniquement les cas universels et sans ambiguïté, c'est-à-dire
+      # les méthodes que possède tout objet du langage, ou dont le nom ne désigne qu'une
+      # opération du langage. Tout autre appel de framework se lève dans le code par
+      # « // nosemgrep: demeter-chain », visible et révisable en revue.
+      - metavariable-regex:
+          metavariable: $B
+          regex: '^(?!(Error|String)(<.*>)?$)'
+
+  # =========================================================================
+  # LOGGER : struct avec code décisionnel -> *slog.Logger injecté et utilisé
+  # En Go, la "classe" est un struct et ses méthodes (récepteur).
+  # Limite : le struct et ses méthodes doivent être dans le même fichier.
+  # =========================================================================
+  - id: logger-missing-in-decision-type
+    languages: [go]
+    severity: WARNING
+    message: "$T.$M contient du code décisionnel mais $T n'a pas de *slog.Logger injecté."
+    paths: { include: ["/internal/", "/cmd/"], exclude: [".opengrep/", "*_test.go"] }
+    patterns:
+      - pattern-either:
+          - pattern: |
+              func ($R *$T) $M(...) {
+                $...BODY
+              }
+          - patterns:
+              - pattern: |
+                  func ($R $T) $M(...) {
+                    $...BODY
+                  }
+              - metavariable-regex: { metavariable: $T, regex: '^\w+$' }
+      - metavariable-pattern:
+          metavariable: $...BODY
+          pattern-either:
+            - pattern: |
+                if $C {
+                  ...
+                }
+            - pattern: |
+                if $I; $C {
+                  ...
+                }
+            - pattern: |
+                for ... {
+                  ...
+                }
+            - pattern: |
+                switch $E {
+                case $V:
+                  ...
+                }
+            - pattern: |
+                switch {
+                case $V:
+                  ...
+                }
+            - pattern: |
+                switch $X.(type) {
+                case $V:
+                  ...
+                }
+            - pattern: |
+                switch $W := $X.(type) {
+                case $V:
+                  ...
+                }
+            - pattern: |
+                select {
+                case $V:
+                  ...
+                }
+            - pattern: $A && $B
+            - pattern: $A || $B
+      # Limite : le struct doit être déclaré avant ses méthodes, dans le même fichier.
+      - pattern-not-inside: |
+          type $T struct {
+            ...
+            $L *slog.Logger
+            ...
+          }
+          ...
+      - focus-metavariable: $M
+
+  - id: logger-injected-but-unused
+    languages: [go]
+    severity: WARNING
+    message: "Le logger $L de $T est injecté mais jamais appelé."
+    paths: { include: ["/internal/", "/cmd/"], exclude: [".opengrep/", "*_test.go"] }
+    patterns:
+      - pattern: |
+          type $T struct {
+            ...
+            $L *slog.Logger
+            ...
+          }
+      - pattern-not-inside: |
+          type $T struct {
+            ...
+            $L *slog.Logger
+            ...
+          }
+          ...
+          func ($R $RT) $M(...) {
+            ...
+            $R.$L.$LOG(...)
+            ...
+          }
+      - focus-metavariable: $L
+
+  - id: logger-global-not-injected
+    languages: [go]
+    severity: WARNING
+    message: "Logger global slog.$F : injecter un *slog.Logger dans le struct."
+    paths: { include: ["/internal/"], exclude: [".opengrep/", "*_test.go", "/internal/adapters/output/logging/"] }
+    patterns:
+      - pattern: slog.$F(...)
+      - metavariable-regex: { metavariable: $F, regex: '^(Debug|Info|Warn|Error|Log|DebugContext|InfoContext|WarnContext|ErrorContext|LogAttrs)$' }
