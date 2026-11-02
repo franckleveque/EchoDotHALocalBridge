@@ -184,32 +184,25 @@ Ordre : du centre vers l'extérieur, un commit par couche, tests verts à chaque
 
 Code intact ; ajout en fin de ligne de `// nosemgrep: demeter-chain <raison>`. Numéros de ligne **avant** refactor, à réactualiser en fin de Task 5.
 
-| # | Fichier : ligne | Expression | Raison |
-|---|---|---|---|
-| 1 | `adapters/input/http/admin_handlers.go:48` | `w.Header().Set(...)` | `net/http` : en-têtes accessibles uniquement via `ResponseWriter.Header()` |
-| 2 | `admin_handlers.go:74` | `w.Header().Set(...)` | idem |
-| 3 | `admin_handlers.go:134` | `r.Header.Get("X-Real-IP")` | `net/http` : `Request.Header` est un `http.Header` |
-| 4 | `admin_handlers.go:137` | `r.Header.Get("X-Forwarded-For")` | idem |
-| 5 | `logs_handlers.go:13` | `w.Header().Set(...)` | `net/http` |
-| 6 | `logs_handlers.go:28` | `w.Header().Set(...)` | idem |
-| 7 | `logs_handlers.go:29` | `w.Header().Set(...)` | idem |
-| 8 | `server.go:82` | `w.Header().Set("WWW-Authenticate", ...)` | `net/http` |
-| 9 | `server.go:94` | `w.Header().Set("WWW-Authenticate", ...)` | idem |
-| 10 | `server.go:116` | `w.Header().Set("Content-Type", ...)` | idem |
-| 11 | `server.go:146` | `w.Header().Set("Content-Type", ...)` | idem |
-| 12 | `adapters/output/homeassistant/client.go:71` | `req.URL.Redacted()` | `net/url` : méthode de `*url.URL`, `Request.URL` est un champ du framework |
-| 13 | `client.go:82` | `time.Since(start).Milliseconds()` | `time` : `Duration.Milliseconds()` |
-| 14 | `client.go:84` | `resp.Body.Close()` | `net/http` : fermeture obligatoire de `Response.Body` |
-| 15 | `client.go:107` | `req.Header.Set("Authorization", ...)` | `net/http` |
-| 16 | `client.go:113` | `resp.Body.Close()` | `net/http` |
-| 17 | `client.go:178` | `req.Header.Set("Authorization", ...)` | `net/http` |
-| 18 | `client.go:179` | `req.Header.Set("Content-Type", ...)` | `net/http` |
-| 19 | `client.go:185` | `resp.Body.Close()` | `net/http` |
-| 20 | `client.go:207` | `req.Header.Set("Authorization", ...)` | `net/http` |
-| 21 | `client.go:213` | `resp.Body.Close()` | `net/http` |
-| 22 | `domain/service/bridge.go:312` | `time.Now().Add(-5 * time.Second)` | `time` : `Time.Add` |
+| Fichier : ligne (état final) | Expression | Raison |
+|---|---|---|
+| `adapters/input/http/admin_handlers.go:78` | `w.Header().Set(...)` | net/http : en-têtes accessibles uniquement via `ResponseWriter.Header()` |
+| `admin_handlers.go:107` | `w.Header().Set(...)` | idem |
+| `admin_handlers.go:170` | `r.Header.Get("X-Real-IP")` | net/http : `Request.Header` est un `http.Header` |
+| `admin_handlers.go:173` | `r.Header.Get("X-Forwarded-For")` | idem |
+| `logs_handlers.go:32, 48, 49` | `w.Header().Set(...) (3)` | net/http |
+| `server.go:91, 105` | `w.Header().Set("WWW-Authenticate", ...) (2)` | net/http |
+| `server.go:131, 156` | `w.Header().Set("Content-Type", ...) (2)` | net/http |
+| `adapters/output/homeassistant/client.go:72` | `req.URL.Redacted()` | net/url : `Request.URL` est un `*url.URL` du framework |
+| `client.go:83` | `time.Since(start).Milliseconds()` | time : `Duration.Milliseconds` |
+| `client.go:85, 114, 186, 214` | `resp.Body.Close() (4)` | net/http : fermeture obligatoire de `Response.Body` |
+| `client.go:108, 179, 180, 208` | `req.Header.Set(...) (4)` | net/http |
+| `domain/service/bridge.go:317` | `time.Now().Add(-5 * time.Second)` | time : `Time.Add` |
+| `cmd/bridge/main.go:183, 186` | `ip.IsLoopback(), ip.To4() (2)` | net : méthodes de `net.IP` sur l'adresse analysée (ajoutées par Task 2) |
 
-- [ ] Ajouter les 22 commentaires, relancer le scan, vérifier que chacun supprime bien sa détection (id court accepté, vérifié sur un cas de test).
+24 occurrences au total (22 prévues + 2 dans `main.go`).
+
+- [x] Ajouter les 24 commentaires, relancer le scan, vérifier que chacun supprime bien sa détection (id court accepté, vérifié sur un cas de test).
 - [ ] Toute nouvelle détection apparue en Task 4 ou 5 : si le code du projet est en cause, corriger par délégation ; sinon l'ajouter à cette table et à la PR.
 - [ ] Commit : `Annotate framework-imposed call chains for demeter-chain`.
 
@@ -223,3 +216,13 @@ Code intact ; ajout en fin de ligne de `// nosemgrep: demeter-chain <raison>`. N
 - [ ] Vérifier le YAML (`python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))"`) et dérouler les étapes localement avec un `GITHUB_STEP_SUMMARY` temporaire.
 - [ ] Pousser la branche, ouvrir la PR avec : le résumé initial (155 violations par règle et fichiers les plus touchés), le lien vers ce plan, la liste des `nosemgrep` avec leur raison, la preuve du scan à 0 (`exit=0`, `errors: []`), les limites de règles signalées (spec) et les changements de comportement.
 - [ ] Ne pas commiter `opengrep-report.*`.
+
+---
+
+## Écarts constatés à l'exécution
+
+1. **Handlers HTTP scindés** (Task 5d). `logger-missing-in-decision-type` exige le struct et ses méthodes dans le même fichier : les handlers de `Server` répartis dans `admin_handlers.go`, `hue_handlers.go`, `logs_handlers.go` restaient signalés. Ils sont devenus `AdminHandlers`, `HueHandlers` et `LogsHandlers` (logger injecté chacun), embarqués dans `Server`. Comportement HTTP inchangé.
+2. **Méthodes `Factory` sans chaîne** (Task 4) : la recherche de stratégie passe par `f.strategies[f.resolve(t)]` pour ne pas créer de nouvelle chaîne Demeter. `Register` et `GetTranslator` sont conservés.
+3. **Niveaux de log** : l'absence d'en-tête `Authorization` (défi Basic normal) et la création des identifiants sont en `Debug`, pour ne pas changer le contenu du tampon attendu par `TestAdminLogs_EmptyIsJSONArray`.
+4. **Moteur OpenGrep** : une méthode à corps vide fait échouer `logger-missing-in-decision-type` avec une erreur interne (`lack range info for $...BODY`, présente dans `errors`). `handleAPIUnknown` écrit donc explicitement `w.WriteHeader(http.StatusOK)` (même réponse). Limite de la règle à signaler.
+5. Tests nouveaux : caractérisation du routage, logs sans secret (mot de passe, jeton, payload), `EntityFilter`, `ParseLevel`, sélection de taille de clé, priorité des attributs, délégation de la fabrique.
