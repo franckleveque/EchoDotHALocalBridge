@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"hue-bridge-emulator/internal/domain/model"
 	"hue-bridge-emulator/internal/ports"
+	"log/slog"
 	"sort"
 	"strconv"
 	"sync"
@@ -13,6 +13,9 @@ import (
 
 	"golang.org/x/sync/singleflight"
 )
+
+// nameAttributes lists the HA attributes used as display name, by priority.
+var nameAttributes = []string{"friendly_name", "name"}
 
 var RefreshInterval = 30 * time.Second
 
@@ -29,13 +32,15 @@ type BridgeService struct {
 	ignoredDomains    []string
 	refreshGroup      singleflight.Group
 	workerSem         chan struct{}
+	logger            *slog.Logger
 }
 
-func NewBridgeService(haPort ports.ReconfigurableHomeAssistantPort, configRepo ports.ConfigRepository, translatorFactory ports.TranslatorFactory) *BridgeService {
+func NewBridgeService(haPort ports.ReconfigurableHomeAssistantPort, configRepo ports.ConfigRepository, translatorFactory ports.TranslatorFactory, logger *slog.Logger) *BridgeService {
 	s := &BridgeService{
 		haPort:            haPort,
 		configRepo:        configRepo,
 		translatorFactory: translatorFactory,
+		logger:            logger,
 		devices:           make(map[string]*model.Device),
 		workerSem:         make(chan struct{}, 10), // Limit to 10 concurrent HA service calls
 	}
@@ -95,8 +100,7 @@ func (s *BridgeService) TestDeviceAction(ctx context.Context, vd *model.VirtualD
 		VirtualDevice: vd,
 	}
 
-	t := s.translatorFactory.GetTranslator(vd.Type)
-	cmd := t.ToHA(&stateCopy, vd)
+	cmd := s.translatorFactory.ToHA(vd.Type, &stateCopy, vd)
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -112,7 +116,7 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 		}
 		s.mu.RUnlock()
 
-		slog.Info("Bridge: refreshing devices from HA")
+		s.logger.Info("Bridge: refreshing devices from HA")
 
 		cfg, err := s.configRepo.Get(ctx)
 		if err != nil {
@@ -121,7 +125,7 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 
 		states, err := s.haPort.GetRawStates(ctx)
 		if err != nil {
-			slog.Error("Bridge: error getting HA states", "error", err)
+			s.logger.Error("Bridge: error getting HA states", "error", err)
 			return nil, err
 		}
 
@@ -137,16 +141,15 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 
 		newDevices := make(map[string]*model.Device)
 
-		slog.Debug("Bridge: processing virtual devices", "count", len(cfg.VirtualDevices), "ha_state_map_size", len(stateMap))
+		s.logger.Debug("Bridge: processing virtual devices", "count", len(cfg.VirtualDevices), "ha_state_map_size", len(stateMap))
 		for _, vd := range cfg.VirtualDevices {
 			state, exists := stateMap[vd.EntityID]
 			if !exists {
-				slog.Warn("Bridge: entity not found in HA states", "entity_id", vd.EntityID)
+				s.logger.Warn("Bridge: entity not found in HA states", "entity_id", vd.EntityID)
 				state = model.HAEntityState{EntityID: vd.EntityID, State: "unavailable"}
 			}
 
-			t := s.translatorFactory.GetTranslator(vd.Type)
-			hueState := t.ToHue(state, vd)
+			hueState := s.translatorFactory.ToHue(vd.Type, state, vd)
 
 			newDevices[vd.HueID] = &model.Device{
 				ID:            vd.HueID,
@@ -173,7 +176,7 @@ func (s *BridgeService) RefreshDevices(ctx context.Context) error {
 		s.sortedDevices = sorted
 		s.lastRefresh = time.Now()
 		s.initialized = true
-		slog.Info("Bridge: refreshed devices", "count", len(s.devices))
+		s.logger.Info("Bridge: refreshed devices", "count", len(s.devices))
 		return nil, nil
 	})
 	return err
@@ -217,7 +220,7 @@ func (s *BridgeService) GetDevice(ctx context.Context, id string) (*model.Device
 }
 
 func (s *BridgeService) GetDeviceMetadata(deviceType model.MappingType) model.HueMetadata {
-	return s.translatorFactory.GetTranslator(deviceType).GetMetadata()
+	return s.translatorFactory.Metadata(deviceType)
 }
 
 func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, stateUpdate *model.DeviceState) error {
@@ -242,10 +245,12 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, stateU
 	vd := device.VirtualDevice
 	if vd.ActionConfig != nil {
 		if tmpState.On && vd.ActionConfig.NoOpOn {
+			s.logger.Debug("Bridge: ON ignored, no-op configured", "device_id", id)
 			s.mu.Unlock()
 			return nil
 		}
 		if !tmpState.On && vd.ActionConfig.NoOpOff {
+			s.logger.Debug("Bridge: OFF ignored, no-op configured", "device_id", id)
 			s.mu.Unlock()
 			return nil
 		}
@@ -261,8 +266,7 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, stateU
 	}
 
 	deviceCopy := s.copyDevice(device)
-	t := s.translatorFactory.GetTranslator(device.Type)
-	cmd := t.ToHA(&tmpState, device.VirtualDevice)
+	cmd := s.translatorFactory.ToHA(device.Type, &tmpState, device.VirtualDevice)
 	s.mu.Unlock()
 
 	select {
@@ -271,10 +275,11 @@ func (s *BridgeService) UpdateDeviceState(ctx context.Context, id string, stateU
 			defer func() { <-s.workerSem }()
 			err := s.haPort.SetState(context.Background(), deviceCopy, cmd)
 			if err != nil {
-				slog.Error("Error setting HA state", "error", err)
+				s.logger.Error("Error setting HA state", "error", err)
 			}
 		}()
 	default:
+		s.logger.Warn("Bridge: too many concurrent HA calls, request rejected", "device_id", id)
 		return fmt.Errorf("too many concurrent requests, please try again later")
 	}
 
@@ -309,7 +314,7 @@ func (s *BridgeService) UpdateConfig(ctx context.Context, cfg *model.Config) err
 
 	// Force refresh
 	s.mu.Lock()
-	s.lastRefresh = time.Now().Add(-5 * time.Second) // Ensure we can refresh
+	s.lastRefresh = time.Now().Add(-5 * time.Second) // nosemgrep: demeter-chain time: Time.Add on time.Now result. Ensure we can refresh
 	s.mu.Unlock()
 
 	// We don't want to fail the whole update if Home Assistant is currently unreachable
@@ -363,28 +368,27 @@ func (s *BridgeService) SetIgnoredDomains(domains []string) {
 
 func (s *BridgeService) extractEntities(states []model.HAEntityState, ignored []string) []ports.HomeAssistantEntity {
 	var entities []ports.HomeAssistantEntity
-	for _, s := range states {
-		if !s.IsSupported(ignored) {
+	filter := NewEntityFilter(ignored, s.logger)
+	for _, st := range states {
+		if !filter.Supports(st.EntityID) {
 			continue
 		}
 
 		name := ""
-		if s.Attributes != nil {
-			if n, ok := s.Attributes["friendly_name"].(string); ok {
+		for _, attr := range nameAttributes {
+			if n, ok := st.Attributes[attr].(string); ok {
 				name = n
-			} else if n, ok := s.Attributes["name"].(string); ok {
-				name = n
+				break
 			}
 		}
 		if name == "" {
-			name = s.EntityID
+			name = st.EntityID
 		}
 
 		entities = append(entities, ports.HomeAssistantEntity{
-			EntityID:     s.EntityID,
+			EntityID:     st.EntityID,
 			FriendlyName: name,
 		})
 	}
 	return entities
 }
-

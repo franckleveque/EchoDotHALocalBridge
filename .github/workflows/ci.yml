@@ -12,6 +12,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Installer OpenGrep 1.33.1
+        run: |
+          curl -fsSL -o /usr/local/bin/opengrep https://github.com/opengrep/opengrep/releases/download/v1.33.1/opengrep_manylinux_x86
+          chmod +x /usr/local/bin/opengrep
+          opengrep --version
+
+      # Exit 0 = aucune violation ; tout autre code (codes OpenGrep) fait échouer l'étape.
+      # Le rapport va dans le résumé du job quel que soit le résultat ; les logs
+      # sont dans un groupe replié du log de l'étape.
+      - name: Règles d'architecture (OpenGrep)
+        run: |
+          set +e
+          opengrep scan -f .opengrep/architecture.yml --error --text-output=opengrep-report.txt . > opengrep.log 2>&1
+          exit_code=$?
+          set -e
+          {
+            echo "## Règles d'architecture OpenGrep (exit code ${exit_code})"
+            echo
+            if [ -s opengrep-report.txt ]; then echo '```'; cat opengrep-report.txt; echo '```'; else echo "Aucune violation, ou aucun rapport produit : voir le groupe « Logs OpenGrep » du log de l'étape."; fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "::group::Logs OpenGrep"
+          cat opengrep.log
+          echo "::endgroup::"
+          exit "${exit_code}"
       - name: Set up Go
         uses: actions/setup-go@v5
         with:

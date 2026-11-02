@@ -123,10 +123,13 @@ func (r *testAuthRepo) Get(ctx context.Context) (*model.AuthConfig, error) {
 func newTestStack(t *testing.T, ha *fakeHA, cfg *model.Config) *httptest.Server {
 	t.Helper()
 
+	ring := logging.NewLineRing(500, 4096, slog.New(slog.DiscardHandler))
+	logger := slog.New(logging.NewHandler(io.Discard, ring, slog.LevelInfo))
+
 	// Real persistence on a temp file
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.json")
-	cfgRepo := persistence.NewJSONConfigRepository(cfgPath)
+	cfgRepo := persistence.NewJSONConfigRepository(cfgPath, slog.New(slog.DiscardHandler))
 	if cfg != nil {
 		fmt.Printf("newTestStack: Saving initial config to %s\n", cfgPath)
 		if err := cfgRepo.Save(context.Background(), cfg); err != nil {
@@ -135,30 +138,24 @@ func newTestStack(t *testing.T, ha *fakeHA, cfg *model.Config) *httptest.Server 
 	}
 
 	authRepo := &testAuthRepo{}
-	authService := service.NewAuthService(authRepo)
+	authService := service.NewAuthService(authRepo, logger)
 
 	// Real HA client pointed at fake HA
-	haClient := homeassistant.NewClient()
+	haClient := homeassistant.NewClient(logger)
 	if ha != nil {
 		haClient.Configure(ha.server.URL, "test-token")
 	}
 
-	translatorFactory := translator.NewFactory()
-	translatorFactory.Register(model.MappingTypeLight, &translator.LightStrategy{})
-	translatorFactory.Register(model.MappingTypeCover, &translator.CoverStrategy{})
-	translatorFactory.Register(model.MappingTypeClimate, &translator.ClimateStrategy{})
-	translatorFactory.Register(model.MappingTypeCustom, &translator.CustomStrategy{})
+	translatorFactory := translator.NewFactory(logger)
+	translatorFactory.Register(model.MappingTypeLight, translator.NewLightStrategy(logger))
+	translatorFactory.Register(model.MappingTypeCover, translator.NewCoverStrategy(logger))
+	translatorFactory.Register(model.MappingTypeClimate, translator.NewClimateStrategy(logger))
+	translatorFactory.Register(model.MappingTypeCustom, translator.NewCustomStrategy(logger))
 
-	bridgeSvc := service.NewBridgeService(haClient, cfgRepo, translatorFactory)
+	bridgeSvc := service.NewBridgeService(haClient, cfgRepo, translatorFactory, logger)
 
-	srv := httpAdapter.NewServer(bridgeSvc, bridgeSvc, authService, "127.0.0.1")
+	srv := httpAdapter.NewServer(bridgeSvc, bridgeSvc, authService, "127.0.0.1", logger)
 
-	// Capture slog output in a ring for the duration of the test. The default
-	// logger is process-global, so tests using this helper must not be parallel.
-	ring := logging.NewLineRing(500, 4096)
-	prevLogger := slog.Default()
-	slog.SetDefault(slog.New(logging.NewHandler(io.Discard, ring, slog.LevelInfo)))
-	t.Cleanup(func() { slog.SetDefault(prevLogger) })
 	srv.SetLogSource(ring)
 	mux := srv.Mux()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

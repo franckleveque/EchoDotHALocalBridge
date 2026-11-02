@@ -1,9 +1,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"hue-bridge-emulator/internal/domain/model"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -36,14 +38,14 @@ func (m *MockAuthRepo) Exists() bool {
 func TestAuthService(t *testing.T) {
 	t.Run("Exists", func(t *testing.T) {
 		mockRepo := new(MockAuthRepo)
-		service := NewAuthService(mockRepo)
+		service := NewAuthService(mockRepo, testLogger)
 		mockRepo.On("Exists").Return(true).Once()
 		assert.True(t, service.Exists())
 	})
 
 	t.Run("Create and Verify Success", func(t *testing.T) {
 		mockRepo := new(MockAuthRepo)
-		service := NewAuthService(mockRepo)
+		service := NewAuthService(mockRepo, testLogger)
 		ctx := context.Background()
 
 		// Create
@@ -65,7 +67,7 @@ func TestAuthService(t *testing.T) {
 
 	t.Run("Verify Failures", func(t *testing.T) {
 		mockRepo := new(MockAuthRepo)
-		service := NewAuthService(mockRepo)
+		service := NewAuthService(mockRepo, testLogger)
 		ctx := context.Background()
 
 		// Not exists
@@ -94,7 +96,7 @@ func TestAuthService(t *testing.T) {
 
 	t.Run("Create Errors", func(t *testing.T) {
 		mockRepo := new(MockAuthRepo)
-		service := NewAuthService(mockRepo)
+		service := NewAuthService(mockRepo, testLogger)
 
 		// Bcrypt error (password too long)
 		err := service.CreateCredentials(context.Background(), "u", string(make([]byte, 100)))
@@ -105,4 +107,24 @@ func TestAuthService(t *testing.T) {
 		err = service.CreateCredentials(context.Background(), "u", "p")
 		assert.Error(t, err)
 	})
+}
+
+func TestAuthService_WrongUsernameIsLoggedWithoutPassword(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	mockRepo := new(MockAuthRepo)
+	service := NewAuthService(mockRepo, logger)
+	ctx := context.Background()
+
+	mockRepo.On("Save", ctx, mock.Anything).Return(nil).Once()
+	assert.NoError(t, service.CreateCredentials(ctx, "admin", "password123"))
+	stored := mockRepo.Calls[0].Arguments.Get(1).(*model.AuthConfig)
+	mockRepo.On("Exists").Return(true)
+	mockRepo.On("Get", ctx).Return(stored, nil)
+
+	ok, err := service.Verify(ctx, "other", "password123")
+	assert.NoError(t, err)
+	assert.False(t, ok)
+	assert.Contains(t, buf.String(), "unknown username")
+	assert.NotContains(t, buf.String(), "password123")
 }

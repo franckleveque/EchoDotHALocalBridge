@@ -3,6 +3,8 @@ package model
 import (
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 )
 
 var (
@@ -20,9 +22,8 @@ type HAAPIError struct {
 	Body   string
 }
 
+// Error joins the non-empty segments (status, then body) with ": ".
 func (e *HAAPIError) Error() string {
-	if e.Body == "" {
-		return fmt.Sprintf("HA API error: %d", e.Status)
-	}
-	return fmt.Sprintf("HA API error: %d: %s", e.Status, e.Body)
+	parts := []string{fmt.Sprintf("HA API error: %d", e.Status), e.Body}
+	return strings.Join(slices.DeleteFunc(parts, func(p string) bool { return p == "" }), ": ")
 }

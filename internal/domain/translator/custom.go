@@ -3,10 +3,20 @@ package translator
 import (
 	"github.com/Knetic/govaluate"
 	"hue-bridge-emulator/internal/domain/model"
+	"log/slog"
 	"strings"
 )
 
-type CustomStrategy struct{}
+// inputAttributes lists the HA attributes read as the input value, by priority.
+var inputAttributes = []string{"brightness", "current_position", "temperature", "value"}
+
+type CustomStrategy struct {
+	logger *slog.Logger
+}
+
+func NewCustomStrategy(logger *slog.Logger) *CustomStrategy {
+	return &CustomStrategy{logger: logger}
+}
 
 func (s *CustomStrategy) ToHue(haState model.HAEntityState, vd *model.VirtualDevice) *model.DeviceState {
 	state := &model.DeviceState{}
@@ -14,14 +24,11 @@ func (s *CustomStrategy) ToHue(haState model.HAEntityState, vd *model.VirtualDev
 
 	// Default to brightness/level if available
 	var input float64
-	if v, ok := haState.Attributes["brightness"].(float64); ok {
-		input = v
-	} else if v, ok := haState.Attributes["current_position"].(float64); ok {
-		input = v
-	} else if v, ok := haState.Attributes["temperature"].(float64); ok {
-		input = v
-	} else if v, ok := haState.Attributes["value"].(float64); ok {
-		input = v
+	for _, attr := range inputAttributes {
+		if v, ok := haState.Attributes[attr].(float64); ok {
+			input = v
+			break
+		}
 	}
 
 	if vd.ActionConfig != nil && vd.ActionConfig.ToHueFormula != "" {
@@ -51,24 +58,18 @@ func (s *CustomStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDevi
 
 	// Guessing attribute name based on entity domain if possible
 	domain := strings.Split(vd.EntityID, ".")[0]
-	switch domain {
-	case "light":
-		params["brightness"] = output
-	case "cover":
-		service = "set_cover_position"
-		params["position"] = int(output)
-	case "climate":
-		service = "set_temperature"
-		params["temperature"] = output
-	case "input_number":
-		service = "set_value"
-		params["value"] = output
-	default:
-		params["value"] = output
+	mapping, ok := domainMappings[domain]
+	if !ok {
+		mapping = defaultDomainMapping
 	}
+	if mapping.Service != "" {
+		service = mapping.Service
+	}
+	params[mapping.Param] = mapping.Convert(output)
 
 	var effect string
 	if vd.ActionConfig != nil {
+		s.logger.Debug("Translator: applying ActionConfig overrides", "strategy", "custom", "entity_id", vd.EntityID, "on", hueState.On)
 		if hueState.On {
 			if vd.ActionConfig.OnService != "" {
 				service = vd.ActionConfig.OnService

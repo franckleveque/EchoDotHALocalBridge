@@ -2,31 +2,51 @@ package http
 
 import (
 	"encoding/json"
+	"hue-bridge-emulator/internal/ports"
+	"log/slog"
 	"net/http"
 )
 
-func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
+// LogsHandlers serves the in-memory log viewer.
+type LogsHandlers struct {
+	logs   ports.LogSource
+	logger *slog.Logger
+}
+
+func NewLogsHandlers(logger *slog.Logger) *LogsHandlers {
+	return &LogsHandlers{logger: logger}
+}
+
+// SetLogSource configures the source of recent log lines. Without one, log
+// readers behave like an empty buffer.
+func (h *LogsHandlers) SetLogSource(src ports.LogSource) {
+	h.logs = src
+}
+
+func (h *LogsHandlers) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
+		h.logger.Warn("Logs: method not allowed", "method", r.Method, "path", r.URL.Path)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8") // nosemgrep: demeter-chain net/http: response headers are only reachable through ResponseWriter.Header()
 	w.Write([]byte(adminLogsHTML))
 }
 
-func (s *Server) handleLogsData(w http.ResponseWriter, r *http.Request) {
+func (h *LogsHandlers) handleLogsData(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
+		h.logger.Warn("Logs: method not allowed", "method", r.Method, "path", r.URL.Path)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	lines := []string{}
-	if s.logs != nil {
-		if l := s.logs.Lines(); l != nil {
+	if h.logs != nil {
+		if l := h.logs.Lines(); l != nil {
 			lines = l
 		}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json") // nosemgrep: demeter-chain net/http: response headers are only reachable through ResponseWriter.Header()
+	w.Header().Set("Cache-Control", "no-store")        // nosemgrep: demeter-chain net/http: response headers are only reachable through ResponseWriter.Header()
 	json.NewEncoder(w).Encode(lines)
 }
 
@@ -64,17 +84,17 @@ const adminLogsHTML = `<!DOCTYPE html>
         var filterEl = document.getElementById('filter');
         var info = document.getElementById('info');
 
+        function message(shown) {
+            if (lines.length === 0) { return 'No log lines yet.'; }
+            if (shown.length === 0) { return 'No lines match the filter.'; }
+            return shown.join('\n');
+        }
+
         function render() {
             var q = filterEl.value.toLowerCase();
             var shown = lines.filter(function (l) { return q === '' || l.toLowerCase().indexOf(q) !== -1; });
             var atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
-            if (lines.length === 0) {
-                pre.textContent = 'No log lines yet.';
-            } else if (shown.length === 0) {
-                pre.textContent = 'No lines match the filter.';
-            } else {
-                pre.textContent = shown.join('\n');
-            }
+            pre.textContent = message(shown);
             info.textContent = shown.length + ' / ' + lines.length + ' lines';
             if (atBottom) { pre.scrollTop = pre.scrollHeight; }
         }

@@ -3,46 +3,53 @@ package http
 import (
 	"encoding/json"
 	"fmt"
+	"hue-bridge-emulator/internal/domain/model"
+	"hue-bridge-emulator/internal/ports"
+	"log/slog"
 	"net/http"
-	"strings"
+	"strconv"
 
 	"github.com/amimof/huego"
 )
 
-func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/api")
-	parts := strings.Split(strings.Trim(path, "/"), "/")
+// handleAPIUnknown answers paths under /api that no route claims. Hue clients
+// probe several of them, so the historical empty 200 answer is kept.
+// HueHandlers serves the Hue bridge API emulated for Alexa.
+type HueHandlers struct {
+	hue    ports.HueEmulationPort
+	logger *slog.Logger
+}
 
-	if r.Method == "POST" && (path == "" || path == "/") {
-		s.handleRegister(w, r)
-		return
+func NewHueHandlers(hue ports.HueEmulationPort, logger *slog.Logger) *HueHandlers {
+	return &HueHandlers{hue: hue, logger: logger}
+}
+
+func (h *HueHandlers) formatUniqueID(id string) string {
+	numericID, _ := strconv.Atoi(id)
+	return fmt.Sprintf("00:17:88:01:00:%02x:%02x:%02x-0b", (numericID>>16)&0xFF, (numericID>>8)&0xFF, numericID&0xFF)
+}
+
+func (h *HueHandlers) toHueState(ds *model.DeviceState) *huego.State {
+	if ds == nil {
+		return nil
 	}
-
-	if len(parts) < 1 {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	subPath := parts[1:]
-	if len(subPath) == 0 {
-		s.handleFullState(w, r)
-		return
-	}
-
-	switch subPath[0] {
-	case "lights":
-		if len(subPath) == 1 {
-			s.handleGetLights(w, r)
-		} else if len(subPath) == 2 {
-			s.handleGetLight(w, r, subPath[1])
-		} else if len(subPath) == 3 && subPath[2] == "state" {
-			s.handleSetLightState(w, r, subPath[1])
-		}
+	return &huego.State{
+		On:        ds.On,
+		Bri:       ds.Bri,
+		Hue:       ds.Hue,
+		Sat:       ds.Sat,
+		Xy:        ds.Xy,
+		Ct:        ds.Ct,
+		Reachable: ds.Reachable,
 	}
 }
 
-func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
-	s.jsonResponse(w, []map[string]interface{}{
+func (h *HueHandlers) handleAPIUnknown(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *HueHandlers) handleRegister(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, []map[string]interface{}{
 		{
 			"success": map[string]string{
 				"username": "admin",
@@ -51,22 +58,23 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleFullState(w http.ResponseWriter, r *http.Request) {
-	devices, err := s.hue.GetDevices(r.Context())
+func (h *HueHandlers) handleFullState(w http.ResponseWriter, r *http.Request) {
+	devices, err := h.hue.GetDevices(r.Context())
 	if err != nil {
+		h.logger.Error("HTTP: Hue request failed", "path", r.URL.Path, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	lights := make(map[string]*huego.Light)
 	for _, d := range devices {
-		meta := s.hue.GetDeviceMetadata(d.Type)
+		meta := h.hue.GetDeviceMetadata(d.Type)
 		lights[d.ID] = &huego.Light{
 			Name:             d.Name,
 			Type:             meta.Type,
-			State:            s.toHueState(d.State),
+			State:            h.toHueState(d.State),
 			ModelID:          meta.ModelID,
-			UniqueID:         s.formatUniqueID(d.ID),
+			UniqueID:         h.formatUniqueID(d.ID),
 			ManufacturerName: meta.ManufacturerName,
 		}
 	}
@@ -84,53 +92,57 @@ func (s *Server) handleFullState(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	s.jsonResponse(w, fullState)
+	writeJSON(w, fullState)
 }
 
-func (s *Server) handleGetLights(w http.ResponseWriter, r *http.Request) {
-	devices, err := s.hue.GetDevices(r.Context())
+func (h *HueHandlers) handleGetLights(w http.ResponseWriter, r *http.Request) {
+	devices, err := h.hue.GetDevices(r.Context())
 	if err != nil {
+		h.logger.Error("HTTP: Hue request failed", "path", r.URL.Path, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	lights := make(map[string]*huego.Light)
 	for _, d := range devices {
-		meta := s.hue.GetDeviceMetadata(d.Type)
+		meta := h.hue.GetDeviceMetadata(d.Type)
 		lights[d.ID] = &huego.Light{
 			Name:             d.Name,
 			Type:             meta.Type,
-			State:            s.toHueState(d.State),
+			State:            h.toHueState(d.State),
 			ModelID:          meta.ModelID,
-			UniqueID:         s.formatUniqueID(d.ID),
+			UniqueID:         h.formatUniqueID(d.ID),
 			ManufacturerName: meta.ManufacturerName,
 		}
 	}
 
-	s.jsonResponse(w, lights)
+	writeJSON(w, lights)
 }
 
-func (s *Server) handleGetLight(w http.ResponseWriter, r *http.Request, id string) {
-	device, err := s.hue.GetDevice(r.Context(), id)
+func (h *HueHandlers) handleGetLight(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	device, err := h.hue.GetDevice(r.Context(), id)
 	if err != nil {
+		h.logger.Debug("Hue: light not found", "id", id, "error", err)
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
-	meta := s.hue.GetDeviceMetadata(device.Type)
+	meta := h.hue.GetDeviceMetadata(device.Type)
 	l := &huego.Light{
 		Name:             device.Name,
 		Type:             meta.Type,
-		State:            s.toHueState(device.State),
+		State:            h.toHueState(device.State),
 		ModelID:          meta.ModelID,
-		UniqueID:         s.formatUniqueID(device.ID),
+		UniqueID:         h.formatUniqueID(device.ID),
 		ManufacturerName: meta.ManufacturerName,
 	}
 
-	s.jsonResponse(w, l)
+	writeJSON(w, l)
 }
 
-func (s *Server) handleSetLightState(w http.ResponseWriter, r *http.Request, id string) {
+func (h *HueHandlers) handleSetLightState(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
 	if r.Method != "PUT" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -145,8 +157,9 @@ func (s *Server) handleSetLightState(w http.ResponseWriter, r *http.Request, id 
 	stateUpdate := parseStateUpdate(rawState)
 	// TODO: handle other fields if needed, but for now these are the main ones
 
-	err := s.hue.UpdateDeviceState(r.Context(), id, stateUpdate)
+	err := h.hue.UpdateDeviceState(r.Context(), id, stateUpdate)
 	if err != nil {
+		h.logger.Error("HTTP: Hue request failed", "path", r.URL.Path, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -160,5 +173,5 @@ func (s *Server) handleSetLightState(w http.ResponseWriter, r *http.Request, id 
 		})
 	}
 
-	s.jsonResponse(w, resp)
+	writeJSON(w, resp)
 }

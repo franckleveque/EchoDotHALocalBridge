@@ -2,9 +2,16 @@ package translator
 
 import (
 	"hue-bridge-emulator/internal/domain/model"
+	"log/slog"
 )
 
-type ClimateStrategy struct{}
+type ClimateStrategy struct {
+	logger *slog.Logger
+}
+
+func NewClimateStrategy(logger *slog.Logger) *ClimateStrategy {
+	return &ClimateStrategy{logger: logger}
+}
 
 func (s *ClimateStrategy) ToHue(haState model.HAEntityState, vd *model.VirtualDevice) *model.DeviceState {
 	state := &model.DeviceState{}
@@ -31,6 +38,7 @@ func (s *ClimateStrategy) ToHA(hueState *model.DeviceState, vd *model.VirtualDev
 
 	var effect string
 	if vd.ActionConfig != nil {
+		s.logger.Debug("Translator: applying ActionConfig overrides", "strategy", "climate", "entity_id", vd.EntityID, "on", hueState.On)
 		if hueState.On {
 			if vd.ActionConfig.OnService != "" {
 				service = vd.ActionConfig.OnService

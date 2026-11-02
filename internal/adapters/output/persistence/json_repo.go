@@ -21,58 +21,39 @@ type JSONConfigRepository struct {
 	cache      *model.Config
 	key        []byte
 	defaultKey []byte
+	logger     *slog.Logger
 }
 
-// Internal structure for migration
-type legacyConfig struct {
-	HassURL        string                           `json:"hass_url"`
-	HassToken      string                           `json:"hass_token"`
-	EntityMappings map[string]*legacyEntityMapping `json:"entity_mappings"`
+// aesKeySizes lists the valid AES key sizes, largest first.
+var aesKeySizes = []int{32, 24, 16}
+
+// selectKeySize returns the largest AES key size that fits in n bytes, or 0.
+func selectKeySize(n int) int {
+	for _, size := range aesKeySizes {
+		if size <= n {
+			return size
+		}
+	}
+	return 0
 }
 
-type legacyEntityMapping struct {
-	EntityID      string               `json:"entity_id"`
-	HueID         string               `json:"hue_id"`
-	Name          string               `json:"name"`
-	Type          model.MappingType    `json:"type"`
-	Exposed       bool                 `json:"exposed"`
-	CustomFormula *legacyCustomFormula `json:"custom_formula,omitempty"`
-}
-
-type legacyCustomFormula struct {
-	ToHueFormula string `json:"to_hue_formula"`
-	ToHAFormula  string `json:"to_ha_formula"`
-	OnService    string `json:"on_service"`
-	OffService   string `json:"off_service"`
-	OnEffect     string `json:"on_effect"`
-	OffEffect    string `json:"off_effect"`
-}
-
-func NewJSONConfigRepository(filepath string) *JSONConfigRepository {
+func NewJSONConfigRepository(filepath string, logger *slog.Logger) *JSONConfigRepository {
 	// Static key for token encryption. Can be overridden via HUE_ENCRYPTION_KEY env var.
 	defaultKey := []byte("a-very-secret-key-32-chars-long!")
 	key := defaultKey
 	if envKey := os.Getenv("HUE_ENCRYPTION_KEY"); envKey != "" {
-		if len(envKey) >= 32 {
-			key = []byte(envKey[:32])
-			if len(envKey) > 32 {
-				slog.Warn("HUE_ENCRYPTION_KEY is longer than 32 characters and will be truncated.")
-			}
-		} else if len(envKey) >= 24 {
-			key = []byte(envKey[:24])
-			if len(envKey) > 24 {
-				slog.Warn("HUE_ENCRYPTION_KEY is between 24 and 31 characters and will be truncated to 24.")
-			}
-		} else if len(envKey) >= 16 {
-			key = []byte(envKey[:16])
-			if len(envKey) > 16 {
-				slog.Warn("HUE_ENCRYPTION_KEY is between 16 and 23 characters and will be truncated to 16.")
-			}
-		} else {
-			slog.Warn("HUE_ENCRYPTION_KEY is too short (min 16 chars). Using default key.")
+		size := selectKeySize(len(envKey))
+		if size == 0 {
+			logger.Warn("HUE_ENCRYPTION_KEY is too short (min 16 chars). Using default key.")
+		}
+		if size > 0 {
+			key = []byte(envKey[:size])
+		}
+		if size > 0 && len(envKey) > size {
+			logger.Warn("HUE_ENCRYPTION_KEY is longer than the AES key size and will be truncated.", "key_size", size)
 		}
 	}
-	return &JSONConfigRepository{filepath: filepath, key: key, defaultKey: defaultKey}
+	return &JSONConfigRepository{filepath: filepath, key: key, defaultKey: defaultKey, logger: logger}
 }
 
 func (r *JSONConfigRepository) Get(ctx context.Context) (*model.Config, error) {
@@ -109,6 +90,7 @@ func (r *JSONConfigRepository) Get(ctx context.Context) (*model.Config, error) {
 	if len(cfg.VirtualDevices) == 0 {
 		migrated, err := r.migrate(data)
 		if err == nil {
+			r.logger.Info("Config: migrated legacy format", "path", r.filepath, "devices", len(migrated.VirtualDevices))
 			if migrated.HassToken != "" {
 				decrypted, err := r.decrypt(migrated.HassToken)
 				if err == nil {
@@ -128,7 +110,7 @@ func (r *JSONConfigRepository) Get(ctx context.Context) (*model.Config, error) {
 			// If decryption fails, it could be plaintext (e.g. first run after update)
 			// Check if it's base64 encoded, if not, it's definitely plaintext or corrupted
 			if _, decodeErr := base64.StdEncoding.DecodeString(cfg.HassToken); decodeErr != nil {
-				// Not base64, likely plaintext
+				r.logger.Warn("Config: HA token is not encrypted, using it as plaintext", "path", r.filepath)
 			} else {
 				// It was base64 but decryption failed - possibly wrong key
 				return nil, fmt.Errorf("failed to decrypt HA token: %w", err)
@@ -214,8 +196,10 @@ func (r *JSONConfigRepository) Save(ctx context.Context, config *model.Config) e
 	}
 
 	if err := os.WriteFile(r.filepath, data, 0600); err != nil {
+		r.logger.Error("Config: write failed", "path", r.filepath, "error", err)
 		return err
 	}
+	r.logger.Debug("Config: saved", "path", r.filepath)
 
 	r.cache = config
 	return nil
