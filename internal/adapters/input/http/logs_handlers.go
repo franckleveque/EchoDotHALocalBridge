@@ -2,11 +2,30 @@ package http
 
 import (
 	"encoding/json"
+	"hue-bridge-emulator/internal/ports"
+	"log/slog"
 	"net/http"
 )
 
-func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
+// LogsHandlers serves the in-memory log viewer.
+type LogsHandlers struct {
+	logs   ports.LogSource
+	logger *slog.Logger
+}
+
+func NewLogsHandlers(logger *slog.Logger) *LogsHandlers {
+	return &LogsHandlers{logger: logger}
+}
+
+// SetLogSource configures the source of recent log lines. Without one, log
+// readers behave like an empty buffer.
+func (h *LogsHandlers) SetLogSource(src ports.LogSource) {
+	h.logs = src
+}
+
+func (h *LogsHandlers) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
+		h.logger.Warn("Logs: method not allowed", "method", r.Method, "path", r.URL.Path)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -14,14 +33,15 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(adminLogsHTML))
 }
 
-func (s *Server) handleLogsData(w http.ResponseWriter, r *http.Request) {
+func (h *LogsHandlers) handleLogsData(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
+		h.logger.Warn("Logs: method not allowed", "method", r.Method, "path", r.URL.Path)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	lines := []string{}
-	if s.logs != nil {
-		if l := s.logs.Lines(); l != nil {
+	if h.logs != nil {
+		if l := h.logs.Lines(); l != nil {
 			lines = l
 		}
 	}

@@ -21,7 +21,7 @@ func (stubAuth) CreateCredentials(ctx context.Context, u, p string) error {
 func (stubAuth) Exists() bool { return true }
 
 func newLogsTestServer() *Server {
-	return NewServer(nil, nil, stubAuth{}, "127.0.0.1")
+	return NewServer(nil, nil, stubAuth{}, "127.0.0.1", slog.Default())
 }
 
 var _ ports.AuthService = stubAuth{}
@@ -119,5 +119,28 @@ func TestLoggingMiddleware_StillLogsOtherRoutes(t *testing.T) {
 	h.ServeHTTP(httptest.NewRecorder(), req)
 	if !strings.Contains(buf.String(), "HTTP request") || !strings.Contains(buf.String(), "/admin/logs") {
 		t.Errorf("expected request log line, got: %s", buf.String())
+	}
+}
+
+type denyAuth struct{ stubAuth }
+
+func (denyAuth) Verify(ctx context.Context, u, p string) (bool, error) { return false, nil }
+
+func TestBasicAuth_LogsRefusalWithoutPassword(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	s := NewServer(nil, nil, denyAuth{}, "127.0.0.1", logger)
+	req := httptest.NewRequest(http.MethodGet, "/admin/logs", nil)
+	req.SetBasicAuth("bob", "hunter2-secret")
+	rec := httptest.NewRecorder()
+	s.Mux().ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	if !strings.Contains(buf.String(), "invalid credentials") || !strings.Contains(buf.String(), "bob") {
+		t.Errorf("expected refusal log, got %q", buf.String())
+	}
+	if strings.Contains(buf.String(), "hunter2-secret") {
+		t.Errorf("password leaked in log: %q", buf.String())
 	}
 }

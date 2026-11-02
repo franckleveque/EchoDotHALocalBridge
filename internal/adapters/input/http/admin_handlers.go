@@ -4,58 +4,82 @@ import (
 	"encoding/json"
 	"fmt"
 	"hue-bridge-emulator/internal/domain/model"
+	"hue-bridge-emulator/internal/ports"
+	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
+// AdminHandlers serves the admin API and pages: setup, config, HA entities
+// and test actions.
+type AdminHandlers struct {
+	admin        ports.AdminPort
+	authService  ports.AuthService
+	setupLimiter map[string]time.Time
+	limiterMu    sync.Mutex
+	logger       *slog.Logger
+}
+
+func NewAdminHandlers(admin ports.AdminPort, authService ports.AuthService, logger *slog.Logger) *AdminHandlers {
+	return &AdminHandlers{
+		admin:        admin,
+		authService:  authService,
+		setupLimiter: make(map[string]time.Time),
+		logger:       logger,
+	}
+}
+
 // withSetupGuard refuses setup requests once credentials exist and rate limits
 // the others per client IP.
-func (s *Server) withSetupGuard(next http.Handler) http.Handler {
+func (h *AdminHandlers) withSetupGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.authService.Exists() {
+		if h.authService.Exists() {
 			// Cleanup the limiter map once setup is done to free memory
-			s.limiterMu.Lock()
-			if len(s.setupLimiter) > 0 {
-				s.setupLimiter = make(map[string]time.Time)
+			h.limiterMu.Lock()
+			if len(h.setupLimiter) > 0 {
+				h.setupLimiter = make(map[string]time.Time)
 			}
-			s.limiterMu.Unlock()
+			h.limiterMu.Unlock()
 
+			h.logger.Warn("HTTP: setup refused, already completed", "from", r.RemoteAddr)
 			http.Error(w, "Forbidden - Setup already completed", http.StatusForbidden)
 			return
 		}
 
 		// Rate limiting for setup
-		ip := s.getClientIP(r)
-		s.limiterMu.Lock()
-		if last, ok := s.setupLimiter[ip]; ok && time.Since(last) < 2*time.Second {
-			s.limiterMu.Unlock()
+		ip := h.getClientIP(r)
+		h.limiterMu.Lock()
+		if last, ok := h.setupLimiter[ip]; ok && time.Since(last) < 2*time.Second {
+			h.limiterMu.Unlock()
+			h.logger.Warn("HTTP: setup rate limited", "client_ip", ip)
 			http.Error(w, "Too many requests", http.StatusTooManyRequests)
 			return
 		}
 
 		// Basic cleanup: if map gets too large, clear it
-		if len(s.setupLimiter) > 1000 {
-			for k, v := range s.setupLimiter {
+		if len(h.setupLimiter) > 1000 {
+			for k, v := range h.setupLimiter {
 				if time.Since(v) > 10*time.Minute {
-					delete(s.setupLimiter, k)
+					delete(h.setupLimiter, k)
 				}
 			}
 		}
 
-		s.setupLimiter[ip] = time.Now()
-		s.limiterMu.Unlock()
+		h.setupLimiter[ip] = time.Now()
+		h.limiterMu.Unlock()
 
 		next.ServeHTTP(w, r)
 	})
 }
 
-func (s *Server) handleAdminSetupPage(w http.ResponseWriter, r *http.Request) {
+func (h *AdminHandlers) handleAdminSetupPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprint(w, adminSetupHTML)
 }
 
-func (s *Server) handleAdminSetupSubmit(w http.ResponseWriter, r *http.Request) {
+func (h *AdminHandlers) handleAdminSetupSubmit(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -65,11 +89,13 @@ func (s *Server) handleAdminSetupSubmit(w http.ResponseWriter, r *http.Request) 
 	password := r.FormValue("password")
 
 	if len(username) < 3 || len(password) < 8 {
+		h.logger.Warn("HTTP: setup rejected, invalid username or password length", "from", r.RemoteAddr)
 		http.Error(w, "Invalid username or password length", http.StatusBadRequest)
 		return
 	}
 
-	if err := s.authService.CreateCredentials(r.Context(), username, password); err != nil {
+	if err := h.authService.CreateCredentials(r.Context(), username, password); err != nil {
+		h.logger.Error("HTTP: admin request failed", "path", r.URL.Path, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -77,14 +103,15 @@ func (s *Server) handleAdminSetupSubmit(w http.ResponseWriter, r *http.Request) 
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }
 
-func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
+func (h *AdminHandlers) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprint(w, adminHTML)
 }
 
-func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
-	cfg, err := s.admin.GetConfig(r.Context())
+func (h *AdminHandlers) handleConfigGet(w http.ResponseWriter, r *http.Request) {
+	cfg, err := h.admin.GetConfig(r.Context())
 	if err != nil {
+		h.logger.Error("HTTP: admin request failed", "path", r.URL.Path, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -102,10 +129,10 @@ func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 		VirtualDevices:      cfg.VirtualDevices,
 	}
 
-	s.jsonResponse(w, displayCfg)
+	writeJSON(w, displayCfg)
 }
 
-func (s *Server) handleConfigPost(w http.ResponseWriter, r *http.Request) {
+func (h *AdminHandlers) handleConfigPost(w http.ResponseWriter, r *http.Request) {
 	var newCfg model.Config
 	if err := json.NewDecoder(r.Body).Decode(&newCfg); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -114,30 +141,32 @@ func (s *Server) handleConfigPost(w http.ResponseWriter, r *http.Request) {
 
 	// If token is empty, keep the existing one
 	if newCfg.HassToken == "" {
-		currentCfg, err := s.admin.GetConfig(r.Context())
+		currentCfg, err := h.admin.GetConfig(r.Context())
 		if err == nil {
 			newCfg.HassToken = currentCfg.HassToken
 		}
 	}
 
-	err := s.admin.UpdateConfig(r.Context(), &newCfg)
+	err := h.admin.UpdateConfig(r.Context(), &newCfg)
 	if err != nil {
+		h.logger.Error("HTTP: admin request failed", "path", r.URL.Path, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *Server) handleHAEntities(w http.ResponseWriter, r *http.Request) {
-	entities, err := s.admin.GetAllEntities(r.Context())
+func (h *AdminHandlers) handleHAEntities(w http.ResponseWriter, r *http.Request) {
+	entities, err := h.admin.GetAllEntities(r.Context())
 	if err != nil {
+		h.logger.Error("HTTP: admin request failed", "path", r.URL.Path, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.jsonResponse(w, entities)
+	writeJSON(w, entities)
 }
 
-func (s *Server) getClientIP(r *http.Request) string {
+func (h *AdminHandlers) getClientIP(r *http.Request) string {
 	if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
 		return xrip
 	}
@@ -152,7 +181,7 @@ func (s *Server) getClientIP(r *http.Request) string {
 	return ip
 }
 
-func (s *Server) handleAdminTestAction(w http.ResponseWriter, r *http.Request) {
+func (h *AdminHandlers) handleAdminTestAction(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -172,9 +201,11 @@ func (s *Server) handleAdminTestAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := s.admin.TestDeviceAction(r.Context(), req.VirtualDevice, parseStateUpdate(req.StateUpdate))
+	err := h.admin.TestDeviceAction(r.Context(), req.VirtualDevice, parseStateUpdate(req.StateUpdate))
 	if err != nil {
-		http.Error(w, err.Error(), statusForTestError(err))
+		status := statusForTestError(err)
+		h.logger.Warn("HTTP: test action failed", "status", status, "error", err)
+		http.Error(w, err.Error(), status)
 		return
 	}
 

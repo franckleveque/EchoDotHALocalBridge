@@ -4,43 +4,34 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"hue-bridge-emulator/internal/domain/model"
 	"hue-bridge-emulator/internal/ports"
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
-
-	"github.com/amimof/huego"
 )
 
+// Server wires the HTTP routes. Handlers live in AdminHandlers, HueHandlers
+// and LogsHandlers, embedded here.
 type Server struct {
-	hue         ports.HueEmulationPort
-	admin       ports.AdminPort
+	*AdminHandlers
+	*HueHandlers
+	*LogsHandlers
 	authService ports.AuthService
 	ip          string
-	setupLimiter map[string]time.Time
-	limiterMu    sync.Mutex
-	logs         ports.LogSource
+	logger      *slog.Logger
 }
 
-func NewServer(hue ports.HueEmulationPort, admin ports.AdminPort, authService ports.AuthService, ip string) *Server {
+func NewServer(hue ports.HueEmulationPort, admin ports.AdminPort, authService ports.AuthService, ip string, logger *slog.Logger) *Server {
 	return &Server{
-		hue:          hue,
-		admin:        admin,
-		authService:  authService,
-		ip:           ip,
-		setupLimiter: make(map[string]time.Time),
+		AdminHandlers: NewAdminHandlers(admin, authService, logger),
+		HueHandlers:   NewHueHandlers(hue, logger),
+		LogsHandlers:  NewLogsHandlers(logger),
+		authService:   authService,
+		ip:            ip,
+		logger:        logger,
 	}
-}
-
-// SetLogSource configures the source of recent log lines. Without one, log
-// readers behave like an empty buffer.
-func (s *Server) SetLogSource(src ports.LogSource) {
-	s.logs = src
 }
 
 func (s *Server) Mux() *http.ServeMux {
@@ -89,12 +80,14 @@ func (s *Server) ListenAndServe(addr string) error {
 func (s *Server) withBasicAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.authService.Exists() {
+			s.logger.Warn("HTTP: admin access refused, initial setup required", "path", r.URL.Path, "from", r.RemoteAddr)
 			http.Error(w, "Forbidden - Initial setup required at /admin/setup", http.StatusForbidden)
 			return
 		}
 
 		u, p, ok := r.BasicAuth()
 		if !ok {
+			s.logger.Debug("HTTP: no basic auth credentials", "path", r.URL.Path, "from", r.RemoteAddr)
 			w.Header().Set("WWW-Authenticate", `Basic realm="restricted", charset="UTF-8"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
@@ -102,11 +95,13 @@ func (s *Server) withBasicAuth(next http.Handler) http.Handler {
 
 		ok, err := s.authService.Verify(r.Context(), u, p)
 		if err != nil {
+			s.logger.Error("HTTP: credential verification failed", "error", err)
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
 
 		if !ok {
+			s.logger.Warn("HTTP: invalid credentials", "path", r.URL.Path, "from", r.RemoteAddr, "username", u)
 			w.Header().Set("WWW-Authenticate", `Basic realm="restricted", charset="UTF-8"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
@@ -157,31 +152,11 @@ func (s *Server) handleDescription(w http.ResponseWriter, r *http.Request) {
 </root>`, s.ip, s.ip)
 }
 
-func (s *Server) formatUniqueID(id string) string {
-	numericID, _ := strconv.Atoi(id)
-	return fmt.Sprintf("00:17:88:01:00:%02x:%02x:%02x-0b", (numericID>>16)&0xFF, (numericID>>8)&0xFF, numericID&0xFF)
-}
-
-func (s *Server) jsonResponse(w http.ResponseWriter, data interface{}) {
+func writeJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	encoder := json.NewEncoder(w)
 	encoder.SetEscapeHTML(false)
 	encoder.Encode(data)
-}
-
-func (s *Server) toHueState(ds *model.DeviceState) *huego.State {
-	if ds == nil {
-		return nil
-	}
-	return &huego.State{
-		On:        ds.On,
-		Bri:       ds.Bri,
-		Hue:       ds.Hue,
-		Sat:       ds.Sat,
-		Xy:        ds.Xy,
-		Ct:        ds.Ct,
-		Reachable: ds.Reachable,
-	}
 }
 
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
@@ -196,7 +171,7 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 				bodyBytes, _ := io.ReadAll(r.Body)
 				r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 				bodyStr := string(bodyBytes)
-				slog.Debug("HTTP request body", "method", r.Method, "path", r.URL.Path, "from", r.RemoteAddr, "body", bodyStr)
+				s.logger.Debug("HTTP request body", "method", r.Method, "path", r.URL.Path, "from", r.RemoteAddr, "body", bodyStr)
 			}
 		}
 
@@ -205,6 +180,6 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		if r.URL.Path == "/admin/logs/data" {
 			return
 		}
-		slog.Info("HTTP request", "method", r.Method, "path", r.URL.Path, "from", r.RemoteAddr, "status", lrw.statusCode, "duration", time.Since(start))
+		s.logger.Info("HTTP request", "method", r.Method, "path", r.URL.Path, "from", r.RemoteAddr, "status", lrw.statusCode, "duration", time.Since(start))
 	})
 }

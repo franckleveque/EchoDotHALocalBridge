@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http/httptest"
 	"reflect"
 	"strings"
@@ -53,7 +54,7 @@ func TestHandleAdminTestAction_StatusMapping(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			s := NewServer(nil, stubAdmin{err: c.err}, stubAuth{}, "127.0.0.1")
+			s := NewServer(nil, stubAdmin{err: c.err}, stubAuth{}, "127.0.0.1", slog.New(slog.DiscardHandler))
 			rec := httptest.NewRecorder()
 			s.handleAdminTestAction(rec, httptest.NewRequest("POST", "/admin/test-action", strings.NewReader(c.body)))
 			if rec.Code != c.want {

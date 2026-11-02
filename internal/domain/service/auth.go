@@ -55,7 +55,7 @@ func (s *AuthService) CreateCredentials(ctx context.Context, username, password 
 		Password: string(hashedPassword),
 	}
 
-	s.logger.Info("Auth: credentials created", "username", username)
+	s.logger.Debug("Auth: credentials created", "username", username)
 	return s.authRepo.Save(ctx, auth)
 }
 

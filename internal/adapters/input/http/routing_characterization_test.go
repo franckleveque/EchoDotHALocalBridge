@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -83,7 +84,7 @@ func TestRouting_Characterization(t *testing.T) {
 		if strings.HasPrefix(c.path, "/admin/setup") {
 			auth = noCredsAuth{}
 		}
-		s := NewServer(&fakeHue{}, fakeAdmin{}, auth, "127.0.0.1")
+		s := NewServer(&fakeHue{}, fakeAdmin{}, auth, "127.0.0.1", slog.New(slog.DiscardHandler))
 		req := httptest.NewRequest(c.method, c.path, strings.NewReader(c.body))
 		req.SetBasicAuth("a", "b")
 		rec := httptest.NewRecorder()
